@@ -75,13 +75,17 @@ jobs:
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0'
       - name: Install SPIR-V validator
         run: |
           set -euxo pipefail
+          brew update
           brew install spirv-tools
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
           dotnet --info
+          dotnet --list-sdks
+          which dotnet
+          which spirv-val || true
           spirv-val --version
       - name: Run Python tests
         env:
