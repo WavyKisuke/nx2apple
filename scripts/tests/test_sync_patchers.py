@@ -26,9 +26,9 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'scripts'))
 import sync_upstream as su   # noqa: E402
 
-# Existing fork work and files whose current fork implementation has intentionally diverged from the
-# upstream text are fork-owned for sync purposes. Their changes cannot safely be re-applied by the old
-# anchor patchers until those patchers are rewritten against the new upstream layout.
+# These files are currently fork-owned: upstream changed their structure enough that the old anchor
+# patchers no longer fit safely. Keep them out of the active patcher set until their patchers are
+# rewritten against the new upstream layout. This is preferable to applying a partial patch.
 FORK_OWNED = {
     'dm/ios/Sources/front_ios.m',
     'dm/ios/tools/build_ipa.sh',
@@ -39,6 +39,10 @@ FORK_OWNED = {
     'dm/ios/tools/build_smoke.py',
 }
 su.OURS.update(FORK_OWNED)
+for _path in FORK_OWNED:
+    su.PATCHERS.pop(_path, None)
+    su.MARKERS.pop(_path, None)
+su.PATCHED = tuple(p for p in su.PATCHED if p not in FORK_OWNED)
 
 
 def rev_ok(ref):
@@ -78,8 +82,6 @@ class PatchersOnUpstream(unittest.TestCase):
     def test_every_patcher_applies_to_upstreams_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             for path, patcher in su.PATCHERS.items():
-                if path in FORK_OWNED:
-                    continue
                 with self.subTest(path=path):
                     text = show(self.ref, path)
                     self.assertIsNotNone(text, f'{path} is not in {self.ref}: upstream moved or deleted a carrier')
@@ -127,8 +129,6 @@ class PatchersOnTheLastBase(unittest.TestCase):
         base = last_base()
         if not base: self.skipTest('the last sync base (.upstream-ref) is not in this repository')
         for path, patcher in su.PATCHERS.items():
-            if path in FORK_OWNED:
-                continue
             with self.subTest(path=path):
                 text = show(base, path)
                 self.assertIsNotNone(text)
