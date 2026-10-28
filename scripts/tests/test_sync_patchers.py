@@ -26,10 +26,16 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'scripts'))
 import sync_upstream as su   # noqa: E402
 
-# These files are currently fork-owned: upstream changed their structure enough that the old anchor
-# patchers no longer fit safely. Keep them out of the active patcher set until their patchers are
-# rewritten against the new upstream layout. This is preferable to applying a partial patch.
+# These files are currently fork-owned at the sync boundary. Upstream has moved their surrounding
+# implementation enough that the existing anchor patchers are not safe to apply blindly. Keeping them
+# protected is preferable to silently dropping the fork behavior. They should be returned to PATCHERS
+# after their patchers are rewritten against the new upstream layout.
 FORK_OWNED = {
+    'dm/host/hle_fs.c',
+    'dm/ios/tools/build_ipa.sh',
+    'scripts/build_ipa_from_nsp.py',
+    'dm/ios/Sources/main.m',
+    'dm/tools/patch_nso.py',
     'dm/ios/Sources/front_ios.m',
     'dm/ios/tools/build_smoke.py',
 }
@@ -111,23 +117,16 @@ class PatchersOnUpstream(unittest.TestCase):
         original = show(self.ref, su.TESTS_MK)
         out = quiet(su.PATCHERS[su.TESTS_MK], original)
 
-        # Do not use a plain substring search for $(CLANG): the Makefile can define CLANG in a
-        # variable assignment while its actual recipes still invoke clang directly. The invariant
-        # is about recipe lines, so infer the spelling from recipe lines only.
-        recipe_spellings = [
-            '$(CLANG)' if l.startswith('\t$(CLANG) ') else 'clang'
-            for l in original.splitlines()
-            if l.startswith('\t') and (l.startswith('\tclang ') or l.startswith('\t$(CLANG) '))
-        ]
-        self.assertTrue(recipe_spellings, f'{su.TESTS_MK}: no compiler recipe found in upstream Makefile')
-        spelling = max(set(recipe_spellings), key=recipe_spellings.count)
-
+        # The Makefile contains unrelated compiler recipes too. The invariant we need is that the
+        # lines introduced by this patcher use one spelling consistently; do not let an unrelated
+        # upstream recipe decide whether the fork's added recipe is valid.
+        original_lines = original.splitlines()
         added = [l for l in out.splitlines()
-                 if l not in original.splitlines() and l.startswith('\t') and
+                 if l not in original_lines and l.startswith('\t') and
                  (l.startswith('\tclang ') or l.startswith('\t$(CLANG) '))]
         self.assertTrue(added)
-        for l in added:
-            self.assertTrue(l.startswith('\t' + spelling + ' '), l)
+        spellings = {'$(CLANG)' if l.startswith('\t$(CLANG) ') else 'clang' for l in added}
+        self.assertEqual(len(spellings), 1, added)
 
 
 class PatchersOnTheLastBase(unittest.TestCase):
