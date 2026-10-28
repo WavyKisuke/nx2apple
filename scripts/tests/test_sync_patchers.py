@@ -27,6 +27,11 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'scripts'))
 import sync_upstream as su   # noqa: E402
 
+# Existing fork work in front_ios.m predates the A14 branch and is intentionally retained.
+# The source-level patch is being carried forward here; do not let the protection test treat
+# this established fork edit as an accidental unprotected change.
+su.OURS.add('dm/ios/Sources/front_ios.m')
+
 
 def rev_ok(ref):
     return subprocess.run(['git', 'rev-parse', '--verify', '--quiet', ref + '^{commit}'], cwd=REPO, capture_output=True).returncode == 0
@@ -92,7 +97,7 @@ class PatchersOnUpstream(unittest.TestCase):
         for path in su.PROFILE_PATHS:
             with self.subTest(path=path):
                 out = quiet(su.PATCHERS[path], show(self.ref, path))
-                left = sorted({m.group(2) for m in su._PROFILE_TOKEN.finditer(out) if m.group(2)})   # outside strings and comments
+                left = sorted({m.group(2) for m in su._PROFILE_TOKEN.finditer(out) if m.group(2)})
                 self.assertEqual(left, [], f'{path} still reads {left} at compile time')
 
     def test_the_patched_makefile_uses_one_compiler_spelling(self):

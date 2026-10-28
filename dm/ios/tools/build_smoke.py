@@ -14,6 +14,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import zipfile
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / 'dm/games'))
@@ -39,8 +40,6 @@ def main():
     assets.mkdir()
     (assets / 'Contents.json').write_text(json.dumps({'info': {'author': 'xcode', 'version': 1}}))
 
-    # One original text page, two writable pages (including the key page),
-    # and one patch page exercise the production Mach-O segment/link flags.
     patched = root / 'patched'
     patched.mkdir()
     modules = profile.words('modules')
@@ -66,7 +65,6 @@ def main():
     (gen / 'dm.xcconfig').write_text(config + f'OTHER_LDFLAGS = $(inherited) $(DM_FRAMEWORKS) {flags}\n')
     run('xcodegen', 'generate')
 
-    # Exercise the real resource-copy phase with tiny, clearly synthetic data.
     romfs = root / 'romfs'
     shaders = root / 'shaders'
     romfs.mkdir()
@@ -98,7 +96,16 @@ def main():
             raise RuntimeError(f'Resource staging failed: {packed}')
     if (app / '_CodeSignature').exists() or (app / 'embedded.mobileprovision').exists():
         raise RuntimeError('The smoke-test app must be unsigned')
+
+    # Preserve the successful CI output as an IPA-shaped artifact. It is
+    # intentionally synthetic and unsigned; it is not a runnable game IPA.
+    ipa = root / 'DmIOS-CI-synthetic.ipa'
+    with zipfile.ZipFile(ipa, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in app.rglob('*'):
+            if path.is_file():
+                zf.write(path, Path('Payload') / app.name / path.relative_to(app))
     print(f'iOS smoke build passed: {executable}', flush=True)
+    print(f'Synthetic unsigned IPA artifact: {ipa}', flush=True)
 
 
 if __name__ == '__main__':

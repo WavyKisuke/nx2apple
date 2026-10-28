@@ -8,7 +8,7 @@ name: tests
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, a14-test]
   workflow_dispatch:
 
 permissions:
@@ -61,7 +61,7 @@ jobs:
           failed=0
           for t in $tests; do
             echo "::group::$t"
-            ./$t 2>&1 | tee "../../../logs/$t.log" && rc=0 || rc=1   # pipefail: the test's status
+            ./$t 2>&1 | tee "../../../logs/$t.log" && rc=0 || rc=1
             echo "::endgroup::"
             if [ "$rc" != 0 ]; then echo "::error::$t failed"; failed=1; fi
           done
@@ -87,22 +87,19 @@ jobs:
         with:
           python-version: '3.14'
           cache: pip
-          cache-dependency-path: .github/workflows/tests.yml   # no requirements file: the packages are listed in the step below
+          cache-dependency-path: .github/workflows/tests.yml
       - name: Install the Python packages the tools import
-        run: python -m pip install lz4 capstone fonttools   # backports.zstd is for Python before 3.14 only
-      # The shader translator's tests (test_image_atomic_bounds, test_dmsh_geometry) run the committed translator on synthetic Maxwell shaders, then spirv-val and the committed spirv-cross:
-      # one translation chain serves every game, so these are what checks a translator change on games its author does not own (GitHub issue #272). Compiling their MSL with
-      # Metal (DMSH_TEST_METAL=1) and running it on the GPU (DMSH_TEST_GPU=1) stay local.
+        run: python -m pip install lz4 capstone fonttools
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'   # dm/gfx/tools/dmsh_xlate_bin targets net10.0
-      - name: Install spirv-val   # spirv-cross is the in-repo build (dm/gfx/tools/spirv_cross_bin)
+          dotnet-version: '10.0.x'
+      - name: Install spirv-val
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
         run: brew install spirv-tools
       - name: Run the test files
         env:
-          DM_GAME: ${{ env.GAME }}   # test_tbdr_budget runs a tool that needs a profile
+          DM_GAME: ${{ env.GAME }}
           DMSH_TEST_XLATE: ${{ github.workspace }}/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
         run: |
           mkdir -p logs
@@ -131,8 +128,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
-      # The patchers of scripts/sync_upstream.py are run on the files of seedds/nxnative main (the remote the fork syncs from) and of the last sync base
-      # (.upstream-ref): one that no longer fits, or whose marker upstream's own text satisfies, fails here before a sync stops or drops fork code silently.
       - name: Fetch seedds main and the last sync base
         run: |
           git remote add seedds https://github.com/seedds/nxnative.git
@@ -152,7 +147,6 @@ jobs:
       - name: Mac host for three profiles (Vulkan, NVN, OpenGL)
         run: |
           mkdir -p logs
-          # Wonder: NVN; Hades: Vulkan; Digimon Story Cyber Sleuth: OpenGL. The second and third reuse the libvpx build in dm/host/gen/vpx.
           for g in 010015100B514000 0100535012974000 010014E00DB56000; do
             echo "::group::dmhost $g"
             make -C dm/host GAME=$g -j3 dmhost 2>&1 | tee "logs/dmhost-$g.log"
@@ -188,8 +182,6 @@ jobs:
         run: |
           mkdir -p ../logs
           swift build -c release 2>&1 | tee ../logs/launcher-build.log
-      # The opt-in tests (a real games folder, the README screenshots, the visual QA capture) skip without their variables; the process
-      # fixtures stand in for the NSP script, xcodebuild and devicectl, so nothing is built, signed or installed
       - name: Tests
         working-directory: frontend
         run: swift test 2>&1 | tee ../logs/launcher-tests.log
@@ -211,7 +203,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
-      # Pure Python: the Windows toolchain, IPA and shim logic with the system calls mocked; the few tests that need PySide6 skip without it
       - name: Tests
         run: python -m unittest discover -s frontend-qt/tests -v
 
@@ -235,3 +226,5 @@ jobs:
           name: logs-ios-build
           path: logs
           retention-days: 7
+
+# Push-trigger verification marker: a14-test workflow path.
