@@ -53,13 +53,12 @@ OURS = {'dm/host/romfs_arc.c', 'dm/host/romfs_arc.h', 'dm/tools/romfs_arc.py',
         # The Increased Memory Limit guide the README links to; upstream has no such file, and the
         # first wholesale sync deleted it.
         'dm/ios/ENTITLEMENTS.md',
-        # Fork-only iOS CI helper and document picker sources.
-        'dm/ios/tools/build_smoke.py',
-        'dm/ios/Sources/DataBookmark.m', 'dm/ios/Sources/DataBookmark.h',
         # This script: fork-only, so a PR that changes it is not a vendored edit (pr-scope reads OURS)
         'scripts/sync_upstream.py', 'scripts/tests/test_sync_patchers.py',   # and its test (issue #92)
         # The NRO bound's tests (issue #14): fork-only, beside nso_code.py's lo bound
-        'dm/tools/tests/test_nro_header.py'}
+        'dm/tools/tests/test_nro_header.py',
+        # The Files-app game-data pick (bookmark of the chosen folder): fork-only, upstream has no such path
+        'dm/ios/Sources/DataBookmark.m', 'dm/ios/Sources/DataBookmark.h'}
 # Vendored files that carry fork patches: taken fresh from upstream, then patched below.
 PATCHED = ('dm/host/hle_fs.c', 'dm/host/Makefile', 'dm/host/tests/Makefile', 'dm/ios/tools/build_ipa.sh',
            'scripts/build_ipa_from_nsp.py',
