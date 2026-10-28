@@ -61,7 +61,7 @@ jobs:
           failed=0
           for t in $tests; do
             echo "::group::$t"
-            ./$t 2>&1 | tee "../../../logs/$t.log" && rc=0 || rc=1   # pipefail: the test's status
+            ./$t 2>&1 | tee "../../../logs/$t.log" && rc=0 || rc=1
             echo "::endgroup::"
             if [ "$rc" != 0 ]; then echo "::error::$t failed"; failed=1; fi
           done
@@ -226,3 +226,5 @@ jobs:
           name: logs-ios-build
           path: logs
           retention-days: 7
+
+# Push-trigger verification marker: a14-test workflow path.
