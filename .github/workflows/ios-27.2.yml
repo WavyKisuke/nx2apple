@@ -1,0 +1,56 @@
+name: iOS 27.2 A14 build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [a14-test]
+
+permissions:
+  contents: read
+
+env:
+  GAME: 010015100B514000
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  ios-build:
+    name: Xcode 27.2 / iOS 27.2 / A14
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select Xcode 27.2 and verify SDK
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.2.app
+          xcodebuild -version
+          SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "iOS SDK: $SDK"
+          test "$SDK" = "27.2"
+      - name: Verify A14 build configuration
+        run: |
+          grep -n -- '-mcpu=apple-a14' dm/ios/project.yml
+      - name: Install XcodeGen
+        run: command -v xcodegen || brew install xcodegen
+      - name: Build production iOS project with synthetic inputs
+        run: |
+          mkdir -p logs
+          python3 dm/ios/tools/build_smoke.py --output "$RUNNER_TEMP/ios-smoke" 2>&1 | tee logs/ios-build.log
+      - name: Upload unsigned iOS 27.2 A14 fixture
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nx2apple-ios27.2-a14-unsigned-fixture
+          path: ${{ runner.temp }}/ios-smoke/DmIOS-CI-synthetic.ipa
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nx2apple-ios27.2-build-logs
+          path: logs
+          retention-days: 7
