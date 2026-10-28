@@ -82,10 +82,10 @@ jobs:
           brew update
           brew install spirv-tools
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          command -v dotnet
           dotnet --info
           dotnet --list-sdks
-          which dotnet
-          which spirv-val || true
+          command -v spirv-val
           spirv-val --version
       - name: Run Python tests
         env:
