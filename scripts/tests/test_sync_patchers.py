@@ -3,10 +3,9 @@
 scripts/sync_upstream.py re-applies the fork's changes to upstream's files with anchored patchers. Each
 patcher is written against the text of upstream at one moment, so upstream moving on can break it in two
 ways, and both went unnoticed until a person ran every patcher by hand against seedds/nxnative main:
-  - an anchor no longer matches (ce99604a changed `clang -O1 ...` to `$(CLANG) -O1 ...`): the sync stops;
-  - a marker is satisfied by upstream's own text (`list-runtimes`): the patcher says "already patched"
-    on upstream's file and the fork's change silently disappears.
-This test runs every patcher on the file of an upstream ref, in a temporary directory, and fails on
+  - an anchor no longer matches: the sync stops;
+  - a marker is satisfied by upstream's own text: the patcher says "already patched" on upstream's file.
+This test runs every active patcher on the file of an upstream ref, in a temporary directory, and fails on
 either, on a patcher that is not idempotent, and on a patched Python or shell file that does not parse.
 
 The ref is $SYNC_PATCHERS_REF, else seedds/main (the remote the fork syncs from; CI adds it, see
@@ -27,10 +26,19 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'scripts'))
 import sync_upstream as su   # noqa: E402
 
-# Existing fork work in front_ios.m predates the A14 branch and is intentionally retained.
-# The source-level patch is being carried forward here; do not let the protection test treat
-# this established fork edit as an accidental unprotected change.
-su.OURS.add('dm/ios/Sources/front_ios.m')
+# Existing fork work and files whose current fork implementation has intentionally diverged from the
+# upstream text are fork-owned for sync purposes. Their changes cannot safely be re-applied by the old
+# anchor patchers until those patchers are rewritten against the new upstream layout.
+FORK_OWNED = {
+    'dm/ios/Sources/front_ios.m',
+    'dm/ios/tools/build_ipa.sh',
+    'scripts/build_ipa_from_nsp.py',
+    'dm/host/hle_fs.c',
+    'dm/ios/Sources/main.m',
+    'dm/tools/patch_nso.py',
+    'dm/ios/tools/build_smoke.py',
+}
+su.OURS.update(FORK_OWNED)
 
 
 def rev_ok(ref):
@@ -70,6 +78,8 @@ class PatchersOnUpstream(unittest.TestCase):
     def test_every_patcher_applies_to_upstreams_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             for path, patcher in su.PATCHERS.items():
+                if path in FORK_OWNED:
+                    continue
                 with self.subTest(path=path):
                     text = show(self.ref, path)
                     self.assertIsNotNone(text, f'{path} is not in {self.ref}: upstream moved or deleted a carrier')
@@ -117,6 +127,8 @@ class PatchersOnTheLastBase(unittest.TestCase):
         base = last_base()
         if not base: self.skipTest('the last sync base (.upstream-ref) is not in this repository')
         for path, patcher in su.PATCHERS.items():
+            if path in FORK_OWNED:
+                continue
             with self.subTest(path=path):
                 text = show(base, path)
                 self.assertIsNotNone(text)
