@@ -16,7 +16,9 @@ permissions:
 
 concurrency:
   group: tests-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Do not cancel an in-progress validation run when another commit lands. A cancelled
+  # required check can make a protected branch look incomplete even when the code is fine.
+  cancel-in-progress: false
 
 env:
   GAME: 010015100B514000
