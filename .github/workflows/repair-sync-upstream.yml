@@ -1,0 +1,38 @@
+name: Repair sync helper
+
+on:
+  push:
+    branches: [a14-test]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor == 'WavyKisuke'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Restore known-good sync helper
+        run: |
+          git show e72c2bf890c3a76d08ee8f62b214e98fd73cc310:scripts/sync_upstream.py > scripts/sync_upstream.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/sync_upstream.py')
+          s = p.read_text()
+          s = s.replace("'dm/ios/ENTITLEMENTS.md',", "'dm/ios/ENTITLEMENTS.md',\n        # Fork-only iOS CI helper and document picker sources.\n        'dm/ios/tools/build_smoke.py',\n        'dm/ios/Sources/DataBookmark.m', 'dm/ios/Sources/DataBookmark.h',")
+          p.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if git diff --quiet -- scripts/sync_upstream.py; then exit 0; fi
+          git add scripts/sync_upstream.py
+          git commit -m 'Restore full sync helper after CI regression'
+          git push origin HEAD:a14-test
+      - name: Remove repair workflow
+        run: |
+          git rm .github/workflows/repair-sync-upstream.yml
+          git commit -m 'Remove one-time sync repair workflow'
+          git push origin HEAD:a14-test
