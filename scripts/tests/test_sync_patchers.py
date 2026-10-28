@@ -31,15 +31,10 @@ import sync_upstream as su   # noqa: E402
 # rewritten against the new upstream layout. This is preferable to applying a partial patch.
 FORK_OWNED = {
     'dm/ios/Sources/front_ios.m',
-    'dm/ios/tools/build_ipa.sh',
-    'scripts/build_ipa_from_nsp.py',
-    'dm/host/hle_fs.c',
-    'dm/ios/Sources/main.m',
-    'dm/tools/patch_nso.py',
     'dm/ios/tools/build_smoke.py',
 }
-su.OURS.update(FORK_OWNED)
 for _path in FORK_OWNED:
+    su.OURS.add(_path)
     su.PATCHERS.pop(_path, None)
     su.MARKERS.pop(_path, None)
 su.PATCHED = tuple(p for p in su.PATCHED if p not in FORK_OWNED)
@@ -115,8 +110,21 @@ class PatchersOnUpstream(unittest.TestCase):
     def test_the_patched_makefile_uses_one_compiler_spelling(self):
         original = show(self.ref, su.TESTS_MK)
         out = quiet(su.PATCHERS[su.TESTS_MK], original)
-        spelling = '$(CLANG)' if '$(CLANG)' in original else 'clang'
-        added = [l for l in out.splitlines() if l not in original.splitlines() and l.startswith('\t') and 'clang' in l.lower()]
+
+        # Do not use a plain substring search for $(CLANG): the Makefile can define CLANG in a
+        # variable assignment while its actual recipes still invoke clang directly. The invariant
+        # is about recipe lines, so infer the spelling from recipe lines only.
+        recipe_spellings = [
+            '$(CLANG)' if l.startswith('\t$(CLANG) ') else 'clang'
+            for l in original.splitlines()
+            if l.startswith('\t') and (l.startswith('\tclang ') or l.startswith('\t$(CLANG) '))
+        ]
+        self.assertTrue(recipe_spellings, f'{su.TESTS_MK}: no compiler recipe found in upstream Makefile')
+        spelling = max(set(recipe_spellings), key=recipe_spellings.count)
+
+        added = [l for l in out.splitlines()
+                 if l not in original.splitlines() and l.startswith('\t') and
+                 (l.startswith('\tclang ') or l.startswith('\t$(CLANG) '))]
         self.assertTrue(added)
         for l in added:
             self.assertTrue(l.startswith('\t' + spelling + ' '), l)
