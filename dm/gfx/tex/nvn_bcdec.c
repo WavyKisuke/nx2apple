@@ -86,15 +86,16 @@ int nvn_bc_decode_par(uint32_t f, const uint8_t *src, size_t pitch, uint32_t w, 
     uint32_t pf; int bpp;
     if (!nvn_bc_unpacked(f, &pf, &bpp)) return -1;
     uint32_t rows = (h + 3) / 4;
-    if ((uint64_t)w * h < 256u * 256u || rows < 32)
+    // Keep small textures on the caller: dispatch overhead is not worth it for a few hundred KB.
+    if ((uint64_t)w * h < 512u * 512u || rows < 32)
         return nvn_bc_decode(f, src, pitch, w, h, dst, dpitch);
     long cores = sysconf(_SC_NPROCESSORS_ONLN);
-    if (cores < 1) cores = 1;
+    if (cores < 2) return nvn_bc_decode(f, src, pitch, w, h, dst, dpitch);
     uint32_t per = (rows + (uint32_t)cores * 4 - 1) / ((uint32_t)cores * 4);
     if (per < 16) per = 16;
     uint32_t bands = (rows + per - 1) / per;
     bc_par_ctx ctx = {f, w, h, per, src, pitch, dst, dpitch};
-    dispatch_apply_f(bands, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0),
+    dispatch_apply_f(bands, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),
                      &ctx, bc_decode_band);
     return 0;
 }
