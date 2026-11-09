@@ -74,6 +74,28 @@ static void test_bc1_matches_reference(void) {
     }
 }
 
+static void test_rgb_dxt1_alpha_semantics(void) {
+    // NVN RGB_DXT1 (0x41 / 0x45) has no alpha channel. In BC1 three-colour
+    // mode, palette entry 3 is transparent in RGBA_DXT1 but must be opaque
+    // in RGB_DXT1. Exercise the same block through linear and sRGB formats.
+    const unsigned char block[8] = {
+        0xE0, 0x07, 0x00, 0xF8,  // c0 <= c1: BC1 three-colour mode
+        0x03, 0x00, 0x00, 0x00   // first pixel selects palette entry 3
+    };
+    const unsigned formats[] = {0x41, 0x45};
+    for (unsigned k = 0; k < sizeof formats / sizeof formats[0]; k++) {
+        unsigned char out[4 * 4 * 4];
+        check(nvn_bc_decode(formats[k], block, 8, 4, 4, out, 16) == 0,
+              "RGB_DXT1 decode succeeds");
+        for (int i = 0; i < 16; i++)
+            check(out[i * 4 + 3] == 255, "RGB_DXT1 alpha is always opaque");
+    }
+    unsigned char rgba[4 * 4 * 4];
+    check(nvn_bc_decode(0x42, block, 8, 4, 4, rgba, 16) == 0,
+          "RGBA_DXT1 decode succeeds");
+    check(rgba[3] == 0, "RGBA_DXT1 retains BC1 transparent palette entry");
+}
+
 static void test_formats_map(void) {
     unsigned pf; int bpp;
     struct { uint32_t fmt; unsigned pf; int bpp; } cases[] = {
@@ -164,6 +186,7 @@ static void test_parallel_matches_serial(void) {
 int main(void) {
     test_parallel_matches_serial();
     test_bc1_matches_reference();
+    test_rgb_dxt1_alpha_semantics();
     test_formats_map();
     test_edge_blocks_trimmed();
     test_bc4_single_channel();
