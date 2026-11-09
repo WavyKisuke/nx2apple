@@ -34,6 +34,7 @@ jobs:
       - name: Verify Odyssey A14 build configuration
         run: |
           grep -n -- '-mcpu=apple-a14' dm/ios/project.yml
+          test "$(python3 dm/games/game.py "$GAME" tex_bc_cpu)" = on
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
       - name: Build Odyssey-profile iOS project with synthetic inputs
