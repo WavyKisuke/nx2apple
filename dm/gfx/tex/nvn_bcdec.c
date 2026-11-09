@@ -5,6 +5,8 @@
 #include "../../third_party/bcdec/bcdec.h"
 #include "nvn_bcdec.h"
 #include <string.h>
+#include <dispatch/dispatch.h>
+#include <unistd.h>
 
 enum { R8Unorm = 10, R8Snorm = 12, RG8Unorm = 30, RG8Snorm = 32, RGBA8Unorm = 70, RGBA8Unorm_sRGB = 71, RGBA16Float = 115 };
 // NVN：0x41 RGB_DXT1、0x42 RGBA_DXT1、0x43 DXT3、0x44 DXT5、0x45–0x48 同上 sRGB、0x49 / 0x4a BC4 无 / 有符号、0x4b / 0x4c BC5、0x4d / 0x4e BC7（sRGB）、0x4f / 0x50 BC6H 有 / 无符号
@@ -54,5 +56,45 @@ int nvn_bc_decode(uint32_t f, const uint8_t *src, size_t pitch, uint32_t w, uint
         block(f, b, tmp, 4 * bpp);   // 边上不满 4×4 的块：先解到临时块再拷需要的部分 | blocks at the edge that are not a full 4×4: decode into a temporary block first, then copy the needed part
         for (uint32_t y = 0; y < ch; y++) memcpy(o + y * dpitch, tmp + y * 4 * bpp, cw * bpp);
     }
+    return 0;
+}
+
+
+// Decode larger BC textures in parallel bands of complete block rows. The final band
+// may contain a partial block row; nvn_bc_decode already trims that edge correctly.
+typedef struct {
+    uint32_t fmt, w, h, rows_per_band;
+    const uint8_t *src;
+    size_t pitch;
+    uint8_t *dst;
+    size_t dpitch;
+} bc_par_ctx;
+
+static void bc_decode_band(void *raw, size_t index) {
+    bc_par_ctx *c = raw;
+    uint32_t row0 = (uint32_t)index * c->rows_per_band;
+    uint32_t y0 = row0 * 4;
+    uint32_t band_h = c->h - y0;
+    uint32_t max_h = c->rows_per_band * 4;
+    if (band_h > max_h) band_h = max_h;
+    nvn_bc_decode(c->fmt, c->src + (size_t)row0 * c->pitch, c->pitch,
+                  c->w, band_h, c->dst + (size_t)y0 * c->dpitch, c->dpitch);
+}
+
+int nvn_bc_decode_par(uint32_t f, const uint8_t *src, size_t pitch, uint32_t w, uint32_t h,
+                      uint8_t *dst, size_t dpitch) {
+    uint32_t pf; int bpp;
+    if (!nvn_bc_unpacked(f, &pf, &bpp)) return -1;
+    uint32_t rows = (h + 3) / 4;
+    if ((uint64_t)w * h < 256u * 256u || rows < 32)
+        return nvn_bc_decode(f, src, pitch, w, h, dst, dpitch);
+    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+    if (cores < 1) cores = 1;
+    uint32_t per = (rows + (uint32_t)cores * 4 - 1) / ((uint32_t)cores * 4);
+    if (per < 16) per = 16;
+    uint32_t bands = (rows + per - 1) / per;
+    bc_par_ctx ctx = {f, w, h, per, src, pitch, dst, dpitch};
+    dispatch_apply_f(bands, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0),
+                     &ctx, bc_decode_band);
     return 0;
 }
