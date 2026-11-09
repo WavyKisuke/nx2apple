@@ -833,6 +833,11 @@ def _ep_drop(x, ids):   # OpEntryPoint without the given interface IDs: model, f
     y[0] = len(y) << 16 | (x[0] & 0xffff)
     return y
 
+def geometry_failure_log(key, phase, details):
+    path = os.path.join(out, key + '_geometry_failure.log')
+    dmsh_geometry.append_failure_log(path, phase, details)
+
+
 def geometry_finish(key, w, j, c1):
     """Build all five input-topology variants; the draw selects one at replay.
     Resources retain logical NVN stage 2 even though Metal executes a kernel.
@@ -842,14 +847,20 @@ def geometry_finish(key, w, j, c1):
     jobs = [{**j, 'key': key + '_g' + str(t), 'geometry_topology': t} for t in range(5)]
     jp = os.path.join(w, key + '_geometry.json'); atomic_json(jp, jobs)
     rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)
-    if rx.returncode: return 'geometry failed', rx.stderr.strip()[:160], None
+    if rx.returncode:
+        geometry_failure_log(key, 'geometry-to-compute translator batch',
+                             f"exit code: {rx.returncode}\nstdout:\n{rx.stdout}\nstderr:\n{rx.stderr}")
+        return 'geometry failed', rx.stderr.strip()[:160], None
     base = None
     for t, job in enumerate(jobs):
         layout = dmsh_geometry.output_layout(code, t)
         k = job['key']; spv = os.path.join(w, k + '.spv')
         dmsh_geometry.flatten_sets(spv)
         r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, spv), spv], capture_output=True, text=True)
-        if r.returncode: return 'geometry MSL failed', r.stderr.strip()[:160], None
+        if r.returncode:
+            geometry_failure_log(key, f'geometry topology {t} SPIR-V to MSL',
+                                 f"exit code: {r.returncode}\nstdout:\n{r.stdout}\nstderr:\n{r.stderr}")
+            return 'geometry MSL failed', r.stderr.strip()[:160], None
         src = dmsh_geometry.capture_input(dmsh_geometry.topology_pointer(precise(dmsh_atomic.check_msl(r.stdout))))
         res = json.load(open(os.path.join(w, k + '.res.json')))
         refl = {'key': key + '_bg' + str(t), 'route': 'B', 'chain': CHAIN, 'dm_ctl': key,
@@ -871,7 +882,10 @@ def geometry_finish(key, w, j, c1):
             save('_b', src, base)
             spv = os.path.join(w, k + '.reader.spv'); dmsh_geometry.flatten_sets(spv)
             r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, spv), spv], capture_output=True, text=True)
-            if r.returncode: return 'geometry reader failed', r.stderr.strip()[:160], None
+            if r.returncode:
+                geometry_failure_log(key, 'geometry vertex-reader SPIR-V to MSL',
+                                     f"exit code: {r.returncode}\nstdout:\n{r.stdout}\nstderr:\n{r.stderr}")
+                return 'geometry reader failed', r.stderr.strip()[:160], None
             reader = vs_layer(vs_init(dmsh_geometry.reader(precise(dmsh_atomic.check_msl(r.stdout)))))
             analysis, full = vs_depth(reader)
             meta = {'key': key + '_bgv', 'route': 'B', 'chain': CHAIN, 'dm_ctl': key,
@@ -896,7 +910,17 @@ def finish(key, w, j, c1):
             write_refl(key, refl)
             return 'ok', '', refl
         try: return geometry_finish(key, w, j, c1)
-        except (ValueError, subprocess.CalledProcessError) as e: return 'geometry failed', str(e)[:160], None
+        except (ValueError, subprocess.CalledProcessError) as e:
+            detail = f'{type(e).__name__}: {e}'
+            if isinstance(e, subprocess.CalledProcessError):
+                detail += f"\ncommand: {e.cmd}"
+                for label in ('stdout', 'stderr'):
+                    value = getattr(e, label, None)
+                    if value:
+                        if isinstance(value, bytes): value = value.decode(errors='replace')
+                        detail += f"\n{label}:\n{value}"
+            geometry_failure_log(key, 'geometry build exception', detail)
+            return 'geometry failed', str(e)[:160], None
     if j['stage'] == 'vs': spv_single_lane(os.path.join(w, key + '.spv'))   # one-lane subgroups (see spv_single_lane)
     r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, os.path.join(w, key + '.spv')), os.path.join(w, key + '.spv'), '--output', msl], capture_output=True, text=True)
     if r.returncode: return 'MSL failed', r.stderr.strip()[:160], None
@@ -963,6 +987,9 @@ def finish(key, w, j, c1):
 keys = sorted(want) if want else sorted(loc)
 NJ = int(os.environ.get('J', '8'))
 os.makedirs(out, exist_ok=True)
+for _key in keys:
+    try: os.unlink(os.path.join(out, _key + '_geometry_failure.log'))
+    except FileNotFoundError: pass
 # A full build starts from no shader outputs, a partial one from none of the keys it builds, so what a run leaves is what it built: every output is restored from the cache anyway.
 # The chain version is the same whatever the profile's tables, so a key that left the map, a shader that no longer builds or a variant no longer made would keep an old library.
 # The stamp goes too, and a full build writes it at the end; a partial build keeps it only while it names the profile's current inputs
@@ -1004,13 +1031,27 @@ misses = [key for key in keys if key not in cache_hits]
 chunks = [misses[i::NJ] for i in range(NJ)]
 def xl(ch):
     jp = os.path.join(w, f'job_{abs(hash(ch[0]))}.json'); json.dump([jobs[k] for k in ch], open(jp, 'w'))
-    return subprocess.run([XLATE, jp, w], capture_output=True, text=True)
+    env = os.environ.copy()
+    if any(jobs[k]['stage'] == 'gs' for k in ch): env['DMSH_STACK'] = '1'
+    return subprocess.run([XLATE, jp, w], capture_output=True, text=True, env=env)
 with cf.ThreadPoolExecutor(NJ) as ex: xr = list(ex.map(xl, [c for c in chunks if c]))
 xerr = {}
+def save_xlate_failure(key, lines):
+    if not lines: return
+    m = re.match(r'\[RED\] \w+: (.*)', lines[0])
+    if m: xerr[key] = m.group(1)[:160]
+    if key in jobs and jobs[key]['stage'] == 'gs':
+        geometry_failure_log(key, 'initial geometry shader translation', '\n'.join(lines))
 for r in xr:
+    failed_key, failed_lines = None, []
     for ln in r.stderr.splitlines():
         m = re.match(r'\[RED\] (\w+): (.*)', ln)
-        if m: xerr[m.group(1)] = m.group(2)[:160]
+        if m:
+            if failed_key is not None: save_xlate_failure(failed_key, failed_lines)
+            failed_key, failed_lines = m.group(1), [ln]
+        elif failed_key is not None:
+            failed_lines.append(ln)
+    if failed_key is not None: save_xlate_failure(failed_key, failed_lines)
 def fin(key):
     if key in cache_hits:
         refl = json.load(open(os.path.join(out, key + '_b.json')))
