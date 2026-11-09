@@ -5,6 +5,7 @@
 #include "../nvn_bcdec.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int failures;
@@ -126,7 +127,42 @@ static void test_bc4_single_channel(void) {
     check(out[1 + 4] == 255, "bc4 writes every row (not just the first)");
 }
 
+// The parallel decoder must match the serial output for every BC family, including odd edges,
+// padded destination rows and a guard after the final row.
+static void test_parallel_matches_serial(void) {
+    static const uint32_t fmts[] = {0x41, 0x42, 0x43, 0x44, 0x45, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50};
+    static const uint32_t sizes[][2] = {{4, 4}, {255, 255}, {256, 256}, {1024, 512}, {1023, 1021}};
+    uint32_t seed = 12345;
+    for (unsigned s = 0; s < sizeof sizes / sizeof sizes[0]; s++) {
+        uint32_t w = sizes[s][0], h = sizes[s][1], bw = (w + 3) / 4, bh = (h + 3) / 4;
+        size_t pitch = (size_t)bw * 16, nsrc = pitch * bh;
+        unsigned char *src = malloc(nsrc);
+        check(src != NULL, "parallel test source allocation");
+        if (!src) return;
+        for (size_t i = 0; i < nsrc; i++) { seed = seed * 1103515245u + 12345u; src[i] = (unsigned char)(seed >> 16); }
+        for (unsigned k = 0; k < sizeof fmts / sizeof fmts[0]; k++) {
+            uint32_t pf; int bpp; nvn_bc_unpacked(fmts[k], &pf, &bpp);
+            size_t sp = (fmts[k] == 0x41 || fmts[k] == 0x42 || fmts[k] == 0x45 || fmts[k] == 0x49 || fmts[k] == 0x4a) ? (size_t)bw * 8 : pitch;
+            size_t dp = (size_t)w * bpp + 12, n = dp * h + 64;
+            unsigned char *a = malloc(n), *b = malloc(n);
+            check(a != NULL && b != NULL, "parallel test output allocation");
+            if (!a || !b) { free(a); free(b); free(src); return; }
+            memset(a, 0x5A, n); memset(b, 0x5A, n);
+            int ra = nvn_bc_decode(fmts[k], src, sp, w, h, a, dp);
+            int rb = nvn_bc_decode_par(fmts[k], src, sp, w, h, b, dp);
+            char msg[128]; snprintf(msg, sizeof msg, "parallel decode %#x %ux%u matches serial", fmts[k], w, h);
+            check(ra == 0 && rb == 0 && !memcmp(a, b, n), msg);
+            free(a); free(b);
+        }
+        free(src);
+    }
+    unsigned char out[4];
+    check(nvn_bc_decode_par(0x25, (const unsigned char *)"", 0, 1, 1, out, 4) == -1,
+          "parallel decoder rejects a non-BC format");
+}
+
 int main(void) {
+    test_parallel_matches_serial();
     test_bc1_matches_reference();
     test_formats_map();
     test_edge_blocks_trimmed();
