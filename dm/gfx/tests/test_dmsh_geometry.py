@@ -178,12 +178,12 @@ class GeometryDiagnostics(unittest.TestCase):
             root = Path(d)
             fake = root / 'fake_translator.py'
             fake.write_text(
-                'import os, sys\\n'
-                'assert os.environ.get("DMSH_STACK") == "1"\\n'
-                'print("translated: 0 ok, 1 failed")\\n'
-                'print("[RED] shader: InvalidOperationException: unsupported geometry instruction", file=sys.stderr)\\n'
-                'print("   at Ryujinx.Graphics.Shader.Translator.Translate() in Translator.cs:line 123", file=sys.stderr)\\n'
-                'sys.exit(1)\\n')
+                'import os, sys\n'
+                'assert os.environ.get("DMSH_STACK") == "1"\n'
+                'print("translated: 0 ok, 1 failed")\n'
+                'print("[RED] shader: InvalidOperationException: unsupported geometry instruction", file=sys.stderr)\n'
+                'print("   at Ryujinx.Graphics.Shader.Translator.Translate() in Translator.cs:line 123", file=sys.stderr)\n'
+                'sys.exit(1)\n')
             result = dmsh_geometry.run_translator(
                 [sys.executable, str(fake)], root / 'jobs.json', root / 'output')
             self.assertEqual(result.returncode, 1)
