@@ -50,10 +50,18 @@ jobs:
           echo "::notice::Metal 4 geometry GPU replay is compile-checked here; execution requires a Metal 4-capable device, not the GitHub paravirtual GPU."
       - name: Test geometry translator helpers and diagnostic logs
         run: python3 -m unittest discover -s dm/gfx/tests -p 'test_dmsh_geometry.py'
-      - name: Build Odyssey-profile iOS project with synthetic inputs
+      - name: Build and package Odyssey-profile synthetic iOS fixture
         run: |
           mkdir -p logs
           python3 dm/ios/tools/build_smoke.py --output "$RUNNER_TEMP/ios-smoke" 2>&1 | tee logs/ios-build.log
+          app="$RUNNER_TEMP/ios-smoke/derived/Build/Products/Release-iphoneos/DmIOS.app"
+          package="$RUNNER_TEMP/ios-smoke/package"
+          test -d "$app"
+          mkdir -p "$package/Payload"
+          ditto "$app" "$package/Payload/DmIOS.app"
+          (cd "$package" && /usr/bin/zip -qry "$RUNNER_TEMP/ios-smoke/DmIOS-CI-synthetic.ipa" Payload)
+          test -s "$RUNNER_TEMP/ios-smoke/DmIOS-CI-synthetic.ipa"
+          /usr/bin/unzip -l "$RUNNER_TEMP/ios-smoke/DmIOS-CI-synthetic.ipa" | grep -q 'Payload/DmIOS.app/Info.plist'
       - name: Upload unsigned iOS 27.2 A14 fixture
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
