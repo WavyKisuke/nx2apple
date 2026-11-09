@@ -39,6 +39,10 @@ jobs:
           test "$(python3 dm/games/game.py "$GAME" tex_bc_cpu)" = on
           python3 dm/games/game.py header "$GAME" "$RUNNER_TEMP/game_profile.h"
           grep -q -- "#define DM_GAME_TEX_BC_CPU 1" "$RUNNER_TEMP/game_profile.h"
+      - name: Validate the production NSP-to-IPA build script
+        run: |
+          python3 -m py_compile scripts/build_ipa_from_nsp.py
+          python3 scripts/build_ipa_from_nsp.py --help >/dev/null
       - name: Verify generated shader-chain header
         run: |
           python3 dm/gfx/tools/dmsh_chain.py --header
