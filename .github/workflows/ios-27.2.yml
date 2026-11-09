@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [odyssey-a14]
+  pull_request:
+    branches: [odyssey-a14]
 
 permissions:
   contents: read
