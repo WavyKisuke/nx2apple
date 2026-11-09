@@ -26,9 +26,10 @@ On GPUs without BC texture compression support (`supportsBCTextureCompression` o
 ## Tests
 
 ```sh
-make -C dm/gfx/tex/tests run       # run t_fmt_mtl and t_tex
+make -C dm/gfx/tex/tests run       # run t_bcdec, t_fmt_mtl and t_tex
 ```
 
+- **`t_bcdec`**: compares parallel CPU BC decoding byte-for-byte with the serial decoder for every BC format, including sRGB variants, odd edge dimensions, padded destination rows and a guard after the output buffer. No game files needed.
 - **`t_fmt_mtl`**: takes the mapping for every NVN format in 0x01–0x9C and, for every one whose mapping is not 0, actually creates a texture on the local Metal device; all of them must be created successfully. It also checks that every NVN format with sRGB in its name lands on a Metal sRGB format. No game files needed.
 - **`t_tex`**: the deswizzling tests, in several groups:
 
