@@ -43,6 +43,8 @@ jobs:
         run: make -C dm/gfx/tex/tests run
       - name: Test geometry shader replay and index compaction
         run: make -C dm/gfx/tests GAME=$GAME t_geometry && dm/gfx/tests/t_geometry
+      - name: Test geometry translator helpers and diagnostic logs
+        run: python3 -m unittest discover -s dm/gfx/tests -p 'test_dmsh_geometry.py'
       - name: Build Odyssey-profile iOS project with synthetic inputs
         run: |
           mkdir -p logs
