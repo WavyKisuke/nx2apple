@@ -97,7 +97,7 @@ static void defaults(void) {
     P.pad_layout = DM_GAME_PAD_LAYOUT; P.opmode = DM_GAME_OPMODE; P.perf_boost = DM_GAME_PERF_BOOST;
     copy_str(P.feedback_snap, sizeof P.feedback_snap, DM_GAME_FEEDBACK_SNAP);
     P.tex_flush_upload = DM_GAME_TEX_FLUSH_UPLOAD; P.render_cond = DM_GAME_RENDER_COND; P.tex_dirty_upload = DM_GAME_TEX_DIRTY_UPLOAD;
-    P.tex_dyn_slots = DM_GAME_TEX_DYN_SLOTS; P.gpu_ts_segment = DM_GAME_GPU_TS_SEGMENT; P.vconv_range = DM_GAME_VCONV_RANGE;
+    P.tex_bc_cpu = DM_GAME_TEX_BC_CPU; P.tex_dyn_slots = DM_GAME_TEX_DYN_SLOTS; P.gpu_ts_segment = DM_GAME_GPU_TS_SEGMENT; P.vconv_range = DM_GAME_VCONV_RANGE;
 #ifdef DM_GAME_NVN_API_MAJOR
     P.nvn_api_major = DM_GAME_NVN_API_MAJOR; P.nvn_api_minor = DM_GAME_NVN_API_MINOR;
 #else
@@ -157,6 +157,7 @@ static void set_kv(const char *k, const char *v) {
     else if (!strcmp(k, "tex_flush_upload")) P.tex_flush_upload = truthy(v);
     else if (!strcmp(k, "render_cond")) P.render_cond = truthy(v);
     else if (!strcmp(k, "tex_dirty_upload")) P.tex_dirty_upload = truthy(v);
+    else if (!strcmp(k, "tex_bc_cpu")) P.tex_bc_cpu = truthy(v);
     else if (!strcmp(k, "tex_dyn_slots")) P.tex_dyn_slots = truthy(v);
     else if (!strcmp(k, "gpu_timestamps")) P.gpu_ts_segment = !strcmp(v, "segment") || !strcmp(v, "1");
     else if (!strcmp(k, "vconv_range")) P.vconv_range = truthy(v);
@@ -197,7 +198,7 @@ static void read_env(void) {
     static const char *keys[] = {"TITLE_ID","NAME","ROMFS_MARKER","PROGRAM_ID","MODULES","MEM_RESERVE","MEM_ALIAS","MEM_STACK","APP_POOL",
         "MEM_USED","SYS_RESOURCE","MEM_MAP_LIMIT","PRESENT_INTERVAL","CORE_PREEMPT","ALLOC_BIG_ALIGN","FPS_TARGET","FPS_HOLD","PRESENT_SNAP",
         "PSO_MTL4","SHARED_FONT","PAD_LAYOUT","OP_MODE","PERF_MODE","FEEDBACK_SNAP","TEX_FLUSH_UPLOAD","RENDER_COND","TEX_DIRTY_UPLOAD",
-        "TEX_DYN_SLOTS","GPU_TIMESTAMPS","VCONV_RANGE","DEVICE_API","GAME_ARGS","GAME_ENV", NULL};
+        "TEX_BC_CPU","TEX_DYN_SLOTS","GPU_TIMESTAMPS","VCONV_RANGE","DEVICE_API","GAME_ARGS","GAME_ENV", NULL};
     char k[64], name[96];
     for (int i = 0; keys[i]; i++) {
         snprintf(k, sizeof k, "%s", keys[i]);
