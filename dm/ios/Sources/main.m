@@ -39,6 +39,26 @@ static BOOL romfs_dir_ok(NSString *d) {
     return [fm fileExistsAtPath:[d stringByAppendingPathComponent:@(dm_profile()->romfs_marker)]];
 }
 
+// Validate a Files-app selection before saving its security-scoped bookmark.
+// An NSP/XCI package is not a runtime RomFS location.
+BOOL dm_game_data_url_is_valid(NSURL *url) {
+    if (!url.isFileURL || url.path.length == 0) return NO;
+    BOOL scoped = [url startAccessingSecurityScopedResource];
+    id directoryValue = nil;
+    [url getResourceValue:&directoryValue forKey:NSURLIsDirectoryKey error:nil];
+    BOOL isDirectory = [directoryValue respondsToSelector:@selector(boolValue)] && [directoryValue boolValue];
+    NSString *path = url.path;
+    BOOL valid = NO;
+    if (isDirectory) {
+        NSString *image = [path stringByAppendingPathComponent:@"romfs.img"];
+        valid = romfs_image_complete(image) || romfs_dir_ok(path);
+    } else {
+        valid = romfs_image_complete(path);
+    }
+    if (scoped) [url stopAccessingSecurityScopedResource];
+    return valid;
+}
+
 // Where one game's data lives under the per-game layout: Documents/games/<title ID>/, holding
 //   romfs.img   the whole RomFS as one image file (what scripts/push_romfs.sh sends), or
 //   romfs/      a ROMFSARC archive or a plain tree, for copies made before images
