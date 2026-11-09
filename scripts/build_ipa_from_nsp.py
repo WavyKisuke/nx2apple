@@ -1873,6 +1873,8 @@ def parse_args(argv):
     ap.add_argument('-l', '--language', help='game language, a code or a name: ja, fr, de, es, it, nl, pt, ru, ko, zh-Hans, zh-Hant, en-GB, fr-CA, es-419, pt-BR, Japanese, ... (default: the LANGUAGE setting, else English); '
                     'it must be one the game supports, which the console lists')
     ap.add_argument('--keep-extracted', action=argparse.BooleanOptionalAction, help='keep the extracted game files after the IPA is built, for the next build (default: the KEEP_EXTRACTED setting, on)')
+    ap.add_argument('--disk-reserve-gb', type=float, default=6.0, help='additional free space to require beyond the source NSP/XCI sizes (default: 6 GB; lower only on a runner that deletes inputs after extraction)')
+    ap.add_argument('--delete-inputs-after-extract', action='store_true', help='delete staged NSP/XCI inputs after all game versions and DLC have been extracted successfully; the extracted RomFS is kept')
     ap.add_argument('--work-dir', help='where the build folder goes (default: <NSP folder>/<title ID>_build); the extracted files, shader cache and temporary files all live there')
     ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')
     ap.add_argument('--gpu', help='NVN games: GPU architectures the app gets its pipeline archive for, made on this Mac with metal-tt, comma-separated: g18p (A19 / A19 Pro), or the name a device\'s log gives when the app has no archive for its GPU; '
@@ -1933,6 +1935,7 @@ def main(args=None):
     if mac and not keep: say('keeping the extracted game files all the same: the game runs from them on the Mac' + (' and the app is made of clones of them' if mac_pack else '')); keep = True
     if prepare_xcode and not keep: raise BuildError('--prepare-xcode requires --keep-extracted: Xcode builds from the extracted files')
     if args.xcode_workspace and not prepare_xcode: raise BuildError('--xcode-workspace requires --prepare-xcode')
+    if not 1.0 <= args.disk_reserve_gb <= 32.0: raise BuildError('--disk-reserve-gb must be between 1 and 32 GB')
     nsp_dir = Path(os.path.expanduser(args.nsp_dir or NSP_DIR or ask('NSP folder: ', 'the NSP folder'))).resolve()
     keys = Path(os.path.expanduser(args.keys or PROD_KEYS or ask('path of prod.keys: ', 'prod.keys (-k)'))).resolve()
     if not nsp_dir.is_dir(): raise BuildError(f'not a folder: {nsp_dir}')
@@ -2044,7 +2047,7 @@ def main(args=None):
     picks = pick_nsps(fam, have, versions)
 
     ex = work / 'extract'; ex.mkdir(parents=True, exist_ok=True); (work / 'tmp').mkdir(exist_ok=True)
-    gb = extract_bytes(picks, False) / 2**30 + 6   # every merged image is complete, including on APFS; shader cache + slack
+    gb = extract_bytes(picks, False) / 2**30 + args.disk_reserve_gb   # keep a configurable safety margin above the source packages
     if free_gb(work) < gb and not all((ex / v).exists() for v in versions): raise BuildError(f'less than {gb:.0f} GB free on the volume of {work}')
     heapck = provisional and HEAP_CHECK and not args.no_heap_check and not heap_checked(g)   # the heap check, when the game needs one (once per provisional profile: it stamps the profile)
     PROG.plan(1 + len(versions) + bool(fam['dlc']) + 4 - (prepare_xcode or (mac and not mac_pack)))   # prepare Xcode (a Mac-only build: the Mac host) replaces app build + IPA pack with one stage (a Mac app: Mac host + Mac app)
@@ -2087,6 +2090,23 @@ def main(args=None):
     PROG.add(glslc + vkcap + glcap + uedec + (gfx == 'nvn'))
     aoc = extract_aoc(nx, keys, repo, work, app, fam, logs)
     dlc_roms = sorted(p for p in aoc.iterdir() if p.is_dir() or p.suffix == '.img') if aoc else []
+    if args.delete_inputs_after_extract:
+        # The iOS build consumes the extracted ExeFS/RomFS and AOC from here on; it no longer needs the original NSP/XCI files.
+        input_paths = {fam['base'], *(p for _, p in fam['updates']), *(p for _, _, p in fam['dlc'])}
+        input_paths.update(p for p in nsp_dir.glob('*') if p.is_file() and p.suffix.lower() in ('.nsz', '.xcz'))
+        released = removed = 0
+        for path in input_paths:
+            try:
+                size = path.stat().st_size
+                path.unlink()
+                released += size
+                removed += 1
+            except FileNotFoundError:
+                pass
+        say(f'released {amount(released, "B")} from {removed} original game package input(s) after extraction')
+        remaining = free_gb(work)
+        if remaining < 2.0:
+            raise BuildError(f'only {remaining:.1f} GB remains after extracting the game; at least 2 GB is required before shader and IPA build stages')
     base = next((dirs[v] for v in versions if picks[v][1] is None), dirs[versions[0]])   # the folder the base game was extracted to alone
     # the app name and bundle ID both come from the base NSP: the game name in its control data, and a bundle ID from its title ID; a setting / the command line overrides them
     app_name = args.app_name or APP_NAME or nacp.name(base / 'control.nacp')
