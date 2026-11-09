@@ -21,7 +21,7 @@ class Startup(unittest.TestCase):
         main = (REPO / 'dm/ios/Sources/main.m').read_text()
         locator = main[main.index('static int romfs_image_complete'):main.index('// Boot prerequisites')]
         source = root / 'locator.m'
-        source.write_text('#import <Foundation/Foundation.h>\n#include <stdio.h>\n#include "romfs_image.h"\n'
+        source.write_text('#import <Foundation/Foundation.h>\n#include <stdio.h>\n#include <string.h>\n#include "romfs_image.h"\n'
                           'static NSString *fixture_doc, *fixture_tmp, *fixture_bundle;\n#define DM_GAME_ROMFS_MARKER "marker"\n'
                           'typedef struct { const char *id, *romfs_marker; } fixture_profile;   /* the fork reads both from the runtime profile */\nstatic const fixture_profile *dm_profile(void) { static const fixture_profile p = {"0100000000000000", "marker"}; return &p; }\n'
                           '@interface FixtureBundle : NSObject\n+ (instancetype)mainBundle;\n- (NSString *)resourcePath;\n@end\n'
@@ -32,7 +32,7 @@ class Startup(unittest.TestCase):
                           # variable, so a test can put the player's choice anywhere on disk.
                           'static NSString *fixture_picked;\n'
                           'NSString *dm_picked_data_path(BOOL *stale) { if (stale) *stale = NO; return fixture_picked; }\n' + locator +
-                          '\nint main(int argc, char **argv) { @autoreleasepool { if (argc < 3) return 2;\n'
+                          '\nint main(int argc, char **argv) { @autoreleasepool { if (argc == 3 && !strcmp(argv[1], "--validate")) return dm_game_data_url_is_valid([NSURL fileURLWithPath:@(argv[2])]) ? 0 : 3; if (argc < 3) return 2;\n'
                           'fixture_doc = @(argv[1]); fixture_tmp = @(argv[2]); fixture_bundle = argc > 3 ? @(argv[3]) : @"/nonexistent-fixture";\n'
                           'if (argc > 4) fixture_picked = @(argv[4]);   // the location the player picked, when a test sets one\n'
                           'NSString *p = romfs_locate();\n'
@@ -40,6 +40,31 @@ class Startup(unittest.TestCase):
         cls.locator = root / 'locator'
         subprocess.run(['clang', '-fobjc-arc', '-Wall', '-Werror', '-I', str(REPO / 'dm/host'),
                         str(source), '-framework', 'Foundation', '-o', str(cls.locator)], check=True)
+
+
+    def test_picker_accepts_only_usable_romfs_locations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tree = root / 'plain-romfs'; tree.mkdir()
+            (tree / 'marker').write_text('this title has its RomFS marker')
+            image_path = root / 'complete.img'
+            image.pack(tree, image_path)
+            wrapper = root / 'wrapped'; wrapper.mkdir()
+            image.pack(tree, wrapper / 'romfs.img')
+            invalid_package = root / 'game.nsp'
+            invalid_package.write_bytes(b'not a runtime RomFS image')
+            empty = root / 'empty'; empty.mkdir()
+
+            def valid(path):
+                result = subprocess.run([str(self.locator), '--validate', str(path)],
+                                        capture_output=True, text=True)
+                return result.returncode == 0
+
+            self.assertTrue(valid(image_path), 'complete RomFS image should be accepted')
+            self.assertTrue(valid(tree), 'this title extracted RomFS folder should be accepted')
+            self.assertTrue(valid(wrapper), 'a folder containing romfs.img should be accepted')
+            self.assertFalse(valid(invalid_package), 'NSP/XCI packages are not direct runtime RomFS inputs')
+            self.assertFalse(valid(empty), 'an unrelated folder should be rejected')
 
     def test_invalid_image_preserves_working_folder_and_valid_image_replaces_it(self):
         with tempfile.TemporaryDirectory() as temporary:
