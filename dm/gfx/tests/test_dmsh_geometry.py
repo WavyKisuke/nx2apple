@@ -253,7 +253,7 @@ class PassthroughCompiler(unittest.TestCase):
                 '--msl-texture-buffer-native', str(spv)
             ], capture_output=True, text=True)
             self.assertEqual(cross.returncode, 0, cross.stderr)
-            self.assertRegex(cross.stdout, r'kernel\\s+void\\s+main0\\s*\\(')
+            self.assertRegex(cross.stdout, r'kernel\s+void\s+main0\s*\(')
             res = json.loads((work / 'emit_then_cut.res.json').read_text())
             self.assertGreater(res['geometry_stride'], 0)
 
