@@ -82,6 +82,7 @@ static void warm_claim(void);
 static id<MTLDevice> g_dev;
 static int g_bc_gpu = 1;   // the device advertises BC texture compression (set where the device is made)
 static int g_bc_cpu;       // decode BC on the CPU: no GPU support and the profile allows it
+static _Atomic uint64_t g_bc_cpu_uploads;
 
 // Map an NVN texture-view format to the actual Metal storage format. On GPUs without BC
 // support the base texture was expanded by tex_desc, so a BC view must use that same
@@ -2188,6 +2189,7 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
             total_bc += (size_t)w * h * z * layers * (size_t)bc_bpp;
         }
     }
+    uint64_t bc_t0 = bc_cpu ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) : 0;
     up_begin();
     id<MTLBuffer> stg = [g_dev newBufferWithLength:(bc_cpu ? total_bc : total) ? (bc_cpu ? total_bc : total) : 16 options:MTLResourceStorageModeShared];
     res_add(stg); [g_up_keep addObject:stg];
@@ -2220,6 +2222,14 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
         }
     }
     free(bc_tmp);
+    if (bc_cpu) {
+        uint64_t elapsed = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - bc_t0;
+        uint64_t n = atomic_fetch_add(&g_bc_cpu_uploads, 1) + 1;
+        if (n <= 8 || n % 100 == 0)
+            MLOG("CPU BC upload #%llu: format %#x %ux%ux%u, %u mips, %zu decoded/staging bytes, %.2f ms",
+                 (unsigned long long)n, t->d.format, t->d.width, t->d.height, t->d.depth,
+                 d.mipmapLevelCount, total_bc, elapsed / 1e6);
+    }
     free(part);
     up_flush();
     return mt;
