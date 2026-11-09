@@ -473,7 +473,16 @@ static void translated(const char *directory) {
     mtl_pool_del(uniforms);mtl_drain();free(uniforms);
 }
 int main(int argc,char **argv) {@autoreleasepool {
-    setvbuf(stdout,NULL,_IONBF,0);assembly();capture_indices();mtl_init();storage_buffers();cpu_read_proofs();pack_test();
+    setvbuf(stdout,NULL,_IONBF,0);assembly();capture_indices();
+    // GitHub-hosted virtual Macs expose a paravirtual GPU without Metal 4.
+    // Keep deterministic CPU geometry checks runnable there, before mtl_init()
+    // attempts to create the Metal 4 NVN device. Full GPU replay remains a
+    // separate test for Metal 4-capable hardware.
+    if(argc>1&&!strcmp(argv[1],"--cpu-only")) {
+        printf("t_geometry --cpu-only: %d checks, %d failed\\n",checks,failed);
+        return failed!=0;
+    }
+    mtl_init();storage_buffers();cpu_read_proofs();pack_test();
     scan_edges();pack_dependency_test(3);pack_dependency_test(257);pack_dependency_test(129032);for(int mode=0;mode<18;mode++)replay(mode);
     if(argc>2&&!strcmp(argv[1],"--passthrough-layouts")) {
         NSData *data=[NSData dataWithContentsOfFile:@(argv[2])];NSArray *layouts=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:nil]:nil;
