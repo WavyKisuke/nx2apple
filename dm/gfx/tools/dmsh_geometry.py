@@ -18,8 +18,8 @@ HELPERS = {'vertex_output': 0, 'geometry_vb_output': 1,
 def append_failure_log(path, phase, details):
     """Append complete shader-build diagnostics without summary truncation."""
     with open(path, 'a', encoding='utf-8') as log:
-        log.write(f'=== {phase} ===\\n')
-        log.write(str(details).rstrip() + '\\n')
+        log.write(f'=== {phase} ===\n')
+        log.write(str(details).rstrip() + '\n')
 
 
 def output_layout(code, input_topology):
