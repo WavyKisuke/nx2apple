@@ -39,8 +39,8 @@ jobs:
           grep -q -- "#define DM_GAME_TEX_BC_CPU 1" "$RUNNER_TEMP/game_profile.h"
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
-      - name: Test CPU BC texture decoder
-        run: make -C dm/gfx/tex/tests t_bcdec && dm/gfx/tex/tests/t_bcdec
+      - name: Test texture subsystem (BC decode, Metal format mapping, deswizzle)
+        run: make -C dm/gfx/tex/tests run
       - name: Build Odyssey-profile iOS project with synthetic inputs
         run: |
           mkdir -p logs
