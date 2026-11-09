@@ -130,7 +130,7 @@ static void test_bc4_single_channel(void) {
 // The parallel decoder must match the serial output for every BC family, including odd edges,
 // padded destination rows and a guard after the final row.
 static void test_parallel_matches_serial(void) {
-    static const uint32_t fmts[] = {0x41, 0x42, 0x43, 0x44, 0x45, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50};
+    static const uint32_t fmts[] = {0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50};
     static const uint32_t sizes[][2] = {{4, 4}, {255, 255}, {256, 256}, {1024, 512}, {1023, 1021}};
     uint32_t seed = 12345;
     for (unsigned s = 0; s < sizeof sizes / sizeof sizes[0]; s++) {
@@ -142,7 +142,7 @@ static void test_parallel_matches_serial(void) {
         for (size_t i = 0; i < nsrc; i++) { seed = seed * 1103515245u + 12345u; src[i] = (unsigned char)(seed >> 16); }
         for (unsigned k = 0; k < sizeof fmts / sizeof fmts[0]; k++) {
             uint32_t pf; int bpp; nvn_bc_unpacked(fmts[k], &pf, &bpp);
-            size_t sp = (fmts[k] == 0x41 || fmts[k] == 0x42 || fmts[k] == 0x45 || fmts[k] == 0x49 || fmts[k] == 0x4a) ? (size_t)bw * 8 : pitch;
+            size_t sp = (fmts[k] == 0x41 || fmts[k] == 0x42 || fmts[k] == 0x45 || fmts[k] == 0x46 || fmts[k] == 0x49 || fmts[k] == 0x4a) ? (size_t)bw * 8 : pitch;
             size_t dp = (size_t)w * bpp + 12, n = dp * h + 64;
             unsigned char *a = malloc(n), *b = malloc(n);
             check(a != NULL && b != NULL, "parallel test output allocation");
