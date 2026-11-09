@@ -20,6 +20,7 @@ shader_versions	v393216
 modules	main subsdk0 sdk
 romfs_marker	SoundData/SeResourceStd2nd.aras
 zip_store	.aras:.bfsar:.bfstm:.mp4:.szs:.metallib
+tex_bc_cpu	on
 
 # ---- Memory ----
 mem_reserve	0x100000000
