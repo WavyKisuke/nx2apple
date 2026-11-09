@@ -59,23 +59,47 @@ jobs:
         env:
           DMSH_TEST_XLATE: ${{ github.workspace }}/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
         run: python3 -m unittest discover -s dm/gfx/tests -p 'test_dmsh_geometry.py' -v
-      - name: Build and package Odyssey-profile synthetic iOS fixture
+      - name: Build and archive CI-only non-runnable iOS fixture
         run: |
           mkdir -p logs
           python3 dm/ios/tools/build_smoke.py --output "$RUNNER_TEMP/ios-smoke" 2>&1 | tee logs/ios-build.log
           app="$RUNNER_TEMP/ios-smoke/derived/Build/Products/Release-iphoneos/DmIOS.app"
           package="$RUNNER_TEMP/ios-smoke/package"
+          archive="$RUNNER_TEMP/ios-smoke/NX2Apple-CI-ONLY-NOT-RUNNABLE.zip"
           test -d "$app"
-          mkdir -p "$package/Payload"
-          ditto "$app" "$package/Payload/DmIOS.app"
-          (cd "$package" && /usr/bin/zip -qry "$RUNNER_TEMP/ios-smoke/DmIOS-CI-synthetic.ipa" Payload)
-          test -s "$RUNNER_TEMP/ios-smoke/DmIOS-CI-synthetic.ipa"
-          /usr/bin/unzip -l "$RUNNER_TEMP/ios-smoke/DmIOS-CI-synthetic.ipa" | grep -q 'Payload/DmIOS.app/Info.plist'
-      - name: Upload unsigned iOS 27.2 A14 fixture
+          mkdir -p "$package"
+          ditto "$app" "$package/DmIOS.app"
+          cat > "$package/DmIOS.app/CI_FIXTURE_NOT_RUNNABLE.txt" <<'EOF'
+          CI COMPILE/LINK FIXTURE ONLY — NOT AN INSTALLABLE OR PLAYABLE APP.
+          This bundle embeds zero-filled placeholder game modules and synthetic resources.
+          It contains no game files, keys, real shader libraries, or device-tested runtime.
+          Do not install or launch it. Build a real app using your own game files.
+          EOF
+          (cd "$package" && /usr/bin/zip -qry "$archive" DmIOS.app)
+          test -s "$archive"
+          /usr/bin/unzip -Z1 "$archive" | grep -q '^DmIOS.app/Info.plist
+      - name: Upload build logs on failure
+        if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: nx2apple-odyssey-ios27.2-a14-unsigned-fixture
-          path: ${{ runner.temp }}/ios-smoke/DmIOS-CI-synthetic.ipa
+          name: nx2apple-ios27.2-build-logs
+          path: logs
+          retention-days: 7
+
+          /usr/bin/unzip -Z1 "$archive" | grep -q '^DmIOS.app/CI_FIXTURE_NOT_RUNNABLE.txt
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nx2apple-ios27.2-build-logs
+          path: logs
+          retention-days: 7
+
+      - name: Upload CI-only non-runnable build fixture (not an IPA)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nx2apple-odyssey-ios27.2-a14-CI-only-NOT-runnable-fixture
+          path: ${{ runner.temp }}/ios-smoke/NX2Apple-CI-ONLY-NOT-RUNNABLE.zip
           if-no-files-found: error
           retention-days: 14
       - name: Upload build logs on failure
