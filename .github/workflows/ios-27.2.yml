@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  GAME: 0100000000010000
+  GAME: "0100000000010000"
 
 defaults:
   run:
