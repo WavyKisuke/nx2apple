@@ -5,8 +5,10 @@ VS capture records are 144 words: position 0, point size 4, clip distances
 This matches ResourceReservations.FillGeometryInputMap. Capture uses the native
 vertex fetch, including its instance divisors and format conversions.
 """
+import os
 import re
 import struct
+import subprocess
 
 WORDS = 144
 CAPTURE_SLOT = 13
@@ -21,6 +23,18 @@ def append_failure_log(path, phase, details):
         log.write(f'=== {phase} ===\n')
         log.write(str(details).rstrip() + '\n')
 
+
+
+def run_translator(command, job_file, output_dir):
+    """Run the offline translator with full per-shader exception diagnostics.
+
+    The C# translator emits stack traces only when DMSH_STACK is set. Preserve
+    complete stdout/stderr in the caller's phase-specific failure log.
+    """
+    env = os.environ.copy()
+    env['DMSH_STACK'] = '1'
+    return subprocess.run([*command, str(job_file), str(output_dir)],
+                          capture_output=True, text=True, env=env)
 
 def output_layout(code, input_topology):
     """Geometry output bounds in the translator's fixed-input compute ABI."""
