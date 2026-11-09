@@ -27,7 +27,7 @@ struct dm_profile {
     int shared_font_ttf;         // -1 = decide by the SDK version (hle_sdk16.c font_skip)
     int pad_layout, opmode, perf_boost;
     char feedback_snap[DM_PROF_STR];
-    int tex_flush_upload, render_cond, tex_dirty_upload, tex_dyn_slots, gpu_ts_segment, vconv_range;
+    int tex_flush_upload, render_cond, tex_dirty_upload, tex_bc_cpu, tex_dyn_slots, gpu_ts_segment, vconv_range;
     int nvn_api_major, nvn_api_minor;   // major 0 = decide by the SDK version (hle_nvn.c nvn_api)
     char args[512], genv[1024];  // game_args / game_env
     char source[512];            // DM_PROFILE, or "compiled defaults"
