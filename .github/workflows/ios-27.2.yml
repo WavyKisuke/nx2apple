@@ -1,4 +1,5 @@
 name: iOS 27.2 A14 build
+# Pull requests targeting odyssey-a14 run the same A14 and shader regression checks.
 
 on:
   workflow_dispatch:
