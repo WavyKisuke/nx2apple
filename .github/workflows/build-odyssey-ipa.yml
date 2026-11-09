@@ -1,0 +1,165 @@
+name: Build Super Mario Odyssey IPA (private)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odyssey-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Extract, translate shaders, and package iOS app
+    runs-on: xcode-27
+    timeout-minutes: 360
+    steps:
+      - name: Refuse to run while the repository is public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          private="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.private')"
+          if [ "$private" != "true" ]; then
+            echo "::error::This workflow handles personal game dumps and build outputs. Change this repository to Private before running it."
+            exit 1
+          fi
+
+      - name: Check out the A14 branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: odyssey-a14
+          persist-credentials: false
+
+      - name: Select Xcode 27.2 and verify SDK and locked Metal compilers
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.2.app
+          xcodebuild -version
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          test "$sdk" = "27.2"
+          expected_ios="$(awk -F '\t' '$1 == "metal_iphoneos" {print $2}' dm/gfx/tools/dmsh_chain.lock)"
+          expected_mac="$(awk -F '\t' '$1 == "metal_macosx" {print $2}' dm/gfx/tools/dmsh_chain.lock)"
+          actual_ios="$(xcrun -sdk iphoneos metal --version 2>&1 | head -n 1)"
+          actual_mac="$(xcrun -sdk macosx metal --version 2>&1 | head -n 1)"
+          test -n "$expected_ios" && test "$actual_ios" = "$expected_ios"
+          test -n "$expected_mac" && test "$actual_mac" = "$expected_mac"
+
+      - name: Install build tools
+        run: |
+          brew install zstd xcodegen
+          xcodebuild -downloadComponent MetalToolchain
+
+      - name: Set up Python and .NET
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --disable-pip-version-check lz4 capstone fonttools backports.zstd nsz
+
+      - name: Download and reassemble the uploaded NSP archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: odyssey-nsp-2026-11-09
+        run: |
+          parts="$RUNNER_TEMP/odyssey-parts"
+          extracted="$RUNNER_TEMP/odyssey-zip-extracted"
+          nsp_dir="$RUNNER_TEMP/odyssey-nsp"
+          mkdir -p "$parts" "$extracted" "$nsp_dir"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'odyssey.zip.part-*' --dir "$parts"
+          for part in aa ab ac; do
+            test -s "$parts/odyssey.zip.part-$part"
+          done
+          cat "$parts/odyssey.zip.part-aa" \
+              "$parts/odyssey.zip.part-ab" \
+              "$parts/odyssey.zip.part-ac" > "$RUNNER_TEMP/odyssey.zip"
+          unzip -tq "$RUNNER_TEMP/odyssey.zip"
+          unzip -q "$RUNNER_TEMP/odyssey.zip" -d "$extracted"
+          count=0
+          while IFS= read -r -d '' file; do
+            dest="$nsp_dir/$(basename "$file")"
+            if [ -e "$dest" ]; then
+              echo "::error::Duplicate NSP filename in uploaded archive: $(basename "$file")"
+              exit 1
+            fi
+            cp "$file" "$dest"
+            count=$((count + 1))
+          done < <(find "$extracted" -type f \( \
+            -iname '*.nsp' -o -iname '*.nsz' -o -iname '*.xci' -o -iname '*.xcz' \
+          \) -print0)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::The ZIP did not contain an NSP, NSZ, XCI, or XCZ game dump."
+            exit 1
+          fi
+          echo "Found $count game package file(s)."
+
+      - name: Write prod.keys from the repository secret
+        env:
+          PROD_KEYS: ${{ secrets.PROD_KEYS }}
+        run: |
+          if [ -z "$PROD_KEYS" ]; then
+            echo "::error::Add your own prod.keys contents as the PROD_KEYS repository secret. Do not upload the key file as a release asset."
+            exit 1
+          fi
+          printf '%s' "$PROD_KEYS" > "$RUNNER_TEMP/prod.keys"
+          chmod 600 "$RUNNER_TEMP/prod.keys"
+          test -s "$RUNNER_TEMP/prod.keys"
+
+      - name: Build the real Odyssey IPA and preserve the external RomFS image
+        run: |
+          mkdir -p "$RUNNER_TEMP/odyssey-output"
+          python scripts/build_ipa_from_nsp.py "$RUNNER_TEMP/odyssey-nsp" \
+            --keys "$RUNNER_TEMP/prod.keys" \
+            --package v393216 \
+            --gpu none \
+            --work-dir "$RUNNER_TEMP/odyssey-work" \
+            --out "$RUNNER_TEMP/odyssey-output/SuperMarioOdyssey.ipa" \
+            --keep-extracted \
+            --progress lines
+          ipa="$RUNNER_TEMP/odyssey-output/SuperMarioOdyssey.ipa"
+          romfs="$RUNNER_TEMP/odyssey-work/extract/v393216/RomFS.img"
+          test -s "$ipa"
+          test -s "$romfs"
+          unzip -tq "$ipa"
+          unzip -Z1 "$ipa" | grep -qx 'Payload/DmIOS.app/Info.plist'
+          unzip -Z1 "$ipa" | grep -qx 'Payload/DmIOS.app/DmIOS'
+          if unzip -Z1 "$ipa" | grep -q 'CI_FIXTURE_NOT_RUNNABLE'; then
+            echo "::error::Refusing to publish a CI-only fixture as a playable IPA."
+            exit 1
+          fi
+          echo "Playable-app package built. RomFS image is a separate private artifact."
+
+      - name: Upload private build outputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nx2apple-odyssey-a14-ipa-and-romfs
+          path: |
+            ${{ runner.temp }}/odyssey-output/SuperMarioOdyssey.ipa
+            ${{ runner.temp }}/odyssey-work/extract/v393216/RomFS.img
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload build logs if packaging fails
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nx2apple-odyssey-a14-build-logs
+          path: ${{ runner.temp }}/odyssey-work/logs
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Remove temporary game files and keys
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/prod.keys" "$RUNNER_TEMP/odyssey.zip"
+          rm -rf "$RUNNER_TEMP/odyssey-parts" \
+                 "$RUNNER_TEMP/odyssey-zip-extracted" \
+                 "$RUNNER_TEMP/odyssey-nsp" \
+                 "$RUNNER_TEMP/odyssey-work"
