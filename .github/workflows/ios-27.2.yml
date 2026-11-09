@@ -43,8 +43,11 @@ jobs:
         run: command -v xcodegen || brew install xcodegen
       - name: Test texture subsystem (BC decode, Metal format mapping, deswizzle)
         run: make -C dm/gfx/tex/tests run
-      - name: Test geometry shader replay and index compaction
-        run: make -C dm/gfx/tests GAME=$GAME t_geometry && dm/gfx/tests/t_geometry
+      - name: Compile geometry replay test and run CPU-only coverage
+        run: |
+          make -C dm/gfx/tests GAME=$GAME t_geometry
+          dm/gfx/tests/t_geometry --cpu-only
+          echo "::notice::Metal 4 geometry GPU replay is compile-checked here; execution requires a Metal 4-capable device, not the GitHub paravirtual GPU."
       - name: Test geometry translator helpers and diagnostic logs
         run: python3 -m unittest discover -s dm/gfx/tests -p 'test_dmsh_geometry.py'
       - name: Build Odyssey-profile iOS project with synthetic inputs
