@@ -3,13 +3,13 @@ name: iOS 27.2 A14 build
 on:
   workflow_dispatch:
   push:
-    branches: [a14-test]
+    branches: [odyssey-a14]
 
 permissions:
   contents: read
 
 env:
-  GAME: 010015100B514000
+  GAME: 0100000000010000
 
 defaults:
   run:
@@ -31,19 +31,19 @@ jobs:
           SDK=$(xcrun --sdk iphoneos --show-sdk-version)
           echo "iOS SDK: $SDK"
           test "$SDK" = "27.2"
-      - name: Verify A14 build configuration
+      - name: Verify Odyssey A14 build configuration
         run: |
           grep -n -- '-mcpu=apple-a14' dm/ios/project.yml
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
-      - name: Build production iOS project with synthetic inputs
+      - name: Build Odyssey-profile iOS project with synthetic inputs
         run: |
           mkdir -p logs
           python3 dm/ios/tools/build_smoke.py --output "$RUNNER_TEMP/ios-smoke" 2>&1 | tee logs/ios-build.log
       - name: Upload unsigned iOS 27.2 A14 fixture
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: nx2apple-ios27.2-a14-unsigned-fixture
+          name: nx2apple-odyssey-ios27.2-a14-unsigned-fixture
           path: ${{ runner.temp }}/ios-smoke/DmIOS-CI-synthetic.ipa
           if-no-files-found: error
           retention-days: 14
