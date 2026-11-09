@@ -158,6 +158,21 @@ def geometry_header(passthrough=True, vertices=1, topology=7, invocations=1):
     return struct.pack('<5I', int(passthrough) << 24, 0, invocations << 24, topology << 24, vertices)
 
 
+class GeometryDiagnostics(unittest.TestCase):
+    def test_failure_log_preserves_complete_multi_phase_output(self):
+        with tempfile.TemporaryDirectory(prefix='geometry_diagnostics_') as d:
+            path = Path(d) / 'shader_geometry_failure.log'
+            translator_output = '[RED] shader: InvalidOperationException: full translator detail\\n' + ('stack-frame\\n' * 40)
+            dmsh_geometry.append_failure_log(path, 'translator', translator_output)
+            dmsh_geometry.append_failure_log(path, 'Metal compile', 'error: unsupported MSL expression')
+            text = path.read_text()
+            self.assertIn('=== translator ===', text)
+            self.assertIn(translator_output, text)
+            self.assertIn('stack-frame\\n' * 40, text)
+            self.assertIn('=== Metal compile ===', text)
+            self.assertIn('error: unsupported MSL expression', text)
+
+
 class GeometryOutputLayout(unittest.TestCase):
     def test_passthrough_uses_input_primitive_vertex_count(self):
         layouts = [dmsh_geometry.output_layout(geometry_header(), t) for t in range(5)]
