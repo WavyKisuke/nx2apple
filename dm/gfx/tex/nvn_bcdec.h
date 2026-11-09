@@ -12,3 +12,8 @@ int nvn_bc_unpacked(uint32_t nvn_fmt, uint32_t *mtl_pf, int *bpp);
 // 解一片 w×h 像素：src 按块行排（每块行 pitch 字节），dst 每像素行 dpitch 字节。成功 0
 // Decode a w×h pixel region: src is laid out by block rows (pitch bytes per block row), dst has dpitch bytes per pixel row. Returns 0 on success
 int nvn_bc_decode(uint32_t nvn_fmt, const uint8_t *src, size_t pitch, uint32_t w, uint32_t h, uint8_t *dst, size_t dpitch);
+
+// Same output as nvn_bc_decode, with large textures split into CPU-core bands (libdispatch).
+// Small regions remain on the calling thread; the call blocks until all bands are decoded.
+int nvn_bc_decode_par(uint32_t nvn_fmt, const uint8_t *src, size_t pitch, uint32_t w, uint32_t h,
+                      uint8_t *dst, size_t dpitch);
