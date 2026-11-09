@@ -162,13 +162,13 @@ class GeometryDiagnostics(unittest.TestCase):
     def test_failure_log_preserves_complete_multi_phase_output(self):
         with tempfile.TemporaryDirectory(prefix='geometry_diagnostics_') as d:
             path = Path(d) / 'shader_geometry_failure.log'
-            translator_output = '[RED] shader: InvalidOperationException: full translator detail\\n' + ('stack-frame\\n' * 40)
+            translator_output = '[RED] shader: InvalidOperationException: full translator detail\n' + ('stack-frame\n' * 40)
             dmsh_geometry.append_failure_log(path, 'translator', translator_output)
             dmsh_geometry.append_failure_log(path, 'Metal compile', 'error: unsupported MSL expression')
             text = path.read_text()
             self.assertIn('=== translator ===', text)
             self.assertIn(translator_output, text)
-            self.assertIn('stack-frame\\n' * 40, text)
+            self.assertIn('stack-frame\n' * 40, text)
             self.assertIn('=== Metal compile ===', text)
             self.assertIn('error: unsupported MSL expression', text)
 
