@@ -39,6 +39,10 @@ jobs:
           test "$(python3 dm/games/game.py "$GAME" tex_bc_cpu)" = on
           python3 dm/games/game.py header "$GAME" "$RUNNER_TEMP/game_profile.h"
           grep -q -- "#define DM_GAME_TEX_BC_CPU 1" "$RUNNER_TEMP/game_profile.h"
+      - name: Verify generated shader-chain header
+        run: |
+          python3 dm/gfx/tools/dmsh_chain.py --header
+          git diff --exit-code -- dm/gfx/nvn/dmsh_chain.h
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
       - name: Test texture subsystem (BC decode, Metal format mapping, deswizzle)
