@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: tests-${{ github.event.pull_request.number || github.ref }}
-cancel-in-progress: true
+  cancel-in-progress: true
 
 env:
   GAME: 010015100B514000   # Super Mario Bros. Wonder: the profile the host and gfx tests are built for (any profile does; the tests are about code, not the game)
