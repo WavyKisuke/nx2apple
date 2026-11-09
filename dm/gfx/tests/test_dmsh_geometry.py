@@ -222,6 +222,55 @@ class GeometryOutputLayout(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('DMSH_TEST_XLATE'), 'set DMSH_TEST_XLATE to the offline translator')
 class PassthroughCompiler(unittest.TestCase):
+    def test_non_passthrough_geometry_emits_compute_kernel(self):
+        root = Path(__file__).resolve().parents[3]
+        table = (root / 'dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Decoders/InstTable.cs').read_text()
+        out_pattern = re.search(r'Add\("([01x]{64})", InstName\.Out\s*,\s*InstEmit\.OutR,', table)[1]
+        exit_pattern = re.search(r'Add\("([01x]{64})", InstName\.Exit\s*,', table)[1]
+        # OUT EmitThenCut exercises both GeometryToCompute.EmitVertex and
+        # GeometryToCompute.EndPrimitive; P7 is the always-true predicate.
+        out_instruction = int(out_pattern.replace('x', '0'), 2) | (7 << 16) | (3 << 39)
+        exit_instruction = int(exit_pattern.replace('x', '0'), 2) | (7 << 16) | 15
+        with tempfile.TemporaryDirectory(prefix='geometry_emit_compute_') as d:
+            work = Path(d)
+            header = bytearray(0x50)
+            struct.pack_into('<5I', header, 0, 4 << 10, 0, 1 << 24, 7 << 24, 4)
+            code = work / 'emit_then_cut.bin'
+            code.write_bytes(header + struct.pack('<QQ', out_instruction, exit_instruction))
+            job = dict(key='emit_then_cut', stage='gs', code=str(code), geometry_topology=3,
+                       tex={}, img={}, attr={}, fout={}, debug=True, reduced=True)
+            job_file = work / 'jobs.json'
+            job_file.write_text(json.dumps([job]))
+            translated = subprocess.run([os.environ['DMSH_TEST_XLATE'], str(job_file), d],
+                                        capture_output=True, text=True)
+            self.assertEqual(translated.returncode, 0, translated.stdout + translated.stderr)
+
+            spv = work / 'emit_then_cut.spv'
+            dmsh_geometry.flatten_sets(spv)
+            cross = subprocess.run([
+                str(root / 'dm/gfx/tools/spirv_cross_bin/spirv-cross'),
+                '--msl', '--msl-version', '20300', '--msl-argument-buffers',
+                '--msl-texture-buffer-native', str(spv)
+            ], capture_output=True, text=True)
+            self.assertEqual(cross.returncode, 0, cross.stderr)
+            self.assertRegex(cross.stdout, r'kernel\\s+void\\s+main0\\s*\\(')
+            res = json.loads((work / 'emit_then_cut.res.json').read_text())
+            self.assertGreater(res['geometry_stride'], 0)
+
+            metal = work / 'emit_then_cut.metal'
+            metal.write_text(dmsh_geometry.capture_input(cross.stdout))
+            for sdk in ('macosx', 'iphoneos'):
+                with self.subTest(sdk=sdk):
+                    air = work / f'emit_then_cut.{sdk}.air'
+                    r = subprocess.run(['xcrun', '-sdk', sdk, 'metal',
+                                        '-fmodules-cache-path=' + d + '/modules',
+                                        '-c', str(metal), '-o', str(air)],
+                                       capture_output=True, text=True)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    subprocess.run(['xcrun', '-sdk', sdk, 'metallib', str(air),
+                                    '-o', str(work / f'emit_then_cut.{sdk}.metallib')],
+                                   check=True, capture_output=True)
+
     def test_passthrough_emits_positions_and_generic_attributes(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent))   # a sibling module: the CI runs each test file from the repository root
         from test_dmsh_reflect import REFLECT
