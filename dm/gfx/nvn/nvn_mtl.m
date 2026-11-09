@@ -2205,7 +2205,7 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
                 if (nvn_deswizzle(&t->d, l, y, src, bc_tmp, pitch)) { RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
                 size_t dst_pitch = (size_t)w * bc_bpp;
                 for (uint32_t zz = 0; zz < z; zz++)
-                    nvn_bc_decode(t->d.format, bc_tmp + (size_t)zz * pitch * rows, pitch, w, h,
+                    nvn_bc_decode_par(t->d.format, bc_tmp + (size_t)zz * pitch * rows, pitch, w, h,
                                   (uint8_t *)stg.contents + off + (size_t)zz * dst_pitch * h, dst_pitch);
                 up_blit_add(stg, off, dst_pitch, dst_pitch * h, MTLSizeMake(w, h, z), mt, y, l);
                 off += dst_pitch * h * z;
