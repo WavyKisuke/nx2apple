@@ -52,8 +52,13 @@ jobs:
           make -C dm/gfx/tests GAME=$GAME t_geometry
           dm/gfx/tests/t_geometry --cpu-only
           echo "::notice::Metal 4 geometry GPU replay is compile-checked here; execution requires a Metal 4-capable device, not the GitHub paravirtual GPU."
-      - name: Test geometry translator helpers and diagnostic logs
-        run: python3 -m unittest discover -s dm/gfx/tests -p 'test_dmsh_geometry.py'
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test geometry translator lowering and diagnostics
+        env:
+          DMSH_TEST_XLATE: ${{ github.workspace }}/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
+        run: python3 -m unittest discover -s dm/gfx/tests -p 'test_dmsh_geometry.py' -v
       - name: Build and package Odyssey-profile synthetic iOS fixture
         run: |
           mkdir -p logs
