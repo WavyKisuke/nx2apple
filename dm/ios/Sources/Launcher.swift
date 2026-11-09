@@ -91,14 +91,18 @@ private struct GameDataSection: View {
             }
         } footer: {
             Text(note.isEmpty
-                 ? "Pick the game's romfs.img or its RomFS folder — an external drive or iCloud Drive works. The app remembers the choice; a re-signed build asks once more."
+                 ? "Choose a complete romfs.img or this game's extracted RomFS folder. NSP/XCI packages are not accepted by this picker yet. External drives and iCloud Drive work; the app remembers the choice."
                  : note)
         }
         .sheet(isPresented: $picking) {
             DocumentPicker { url in
                 picking = false
+                guard dm_game_data_url_is_valid(url) else {
+                    note = "That isn't a usable RomFS location for this game. Choose a complete romfs.img or the actual extracted RomFS folder. NSP/XCI packages aren't accepted here yet."
+                    return
+                }
                 if dm_store_picked_data(url) {
-                    note = "Saved. The game uses this location when you press Play."
+                    note = "Valid game data saved. The game uses this location when you press Play."
                     refresh()
                 } else {
                     note = "That location could not be remembered — try a different one."
