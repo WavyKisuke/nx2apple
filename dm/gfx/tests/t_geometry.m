@@ -479,7 +479,7 @@ int main(int argc,char **argv) {@autoreleasepool {
     // attempts to create the Metal 4 NVN device. Full GPU replay remains a
     // separate test for Metal 4-capable hardware.
     if(argc>1&&!strcmp(argv[1],"--cpu-only")) {
-        printf("t_geometry --cpu-only: %d checks, %d failed\\n",checks,failed);
+        printf("t_geometry --cpu-only: %d checks, %d failed",checks,failed); putchar(10);
         return failed!=0;
     }
     mtl_init();storage_buffers();cpu_read_proofs();pack_test();
