@@ -4,7 +4,7 @@ t_tex: t_tex.c ../nvn_deswizzle.c ../nvn_deswizzle.h ../../nvn/nvn_tex.c ../../n
 	clang $(CFLAGS) -o $@ t_tex.c ../nvn_deswizzle.c ../../nvn/nvn_tex.c -lm
 t_fmt_mtl: t_fmt_mtl.m ../nvn_fmt_mtl.c ../nvn_fmt_mtl.h
 	clang $(CFLAGS) -fobjc-arc -o $@ t_fmt_mtl.m ../nvn_fmt_mtl.c -framework Metal -framework Foundation
-t_bcdec: t_bcdec.c ../nvn_bcdec.c ../nvn_bcdec.h ../../third_party/bcdec/bcdec.h
+t_bcdec: t_bcdec.c ../nvn_bcdec.c ../nvn_bcdec.h ../../../third_party/bcdec/bcdec.h
 	clang $(CFLAGS) -o $@ t_bcdec.c ../nvn_bcdec.c -framework Foundation
 run: t_tex t_fmt_mtl t_bcdec
 	./t_bcdec && ./t_fmt_mtl && ./t_tex
