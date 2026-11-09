@@ -35,6 +35,8 @@ jobs:
         run: |
           grep -n -- '-mcpu=apple-a14' dm/ios/project.yml
           test "$(python3 dm/games/game.py "$GAME" tex_bc_cpu)" = on
+          python3 dm/games/game.py header "$GAME" "$RUNNER_TEMP/game_profile.h"
+          grep -q -- "#define DM_GAME_TEX_BC_CPU 1" "$RUNNER_TEMP/game_profile.h"
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
       - name: Test CPU BC texture decoder
