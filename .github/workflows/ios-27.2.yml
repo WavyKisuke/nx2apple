@@ -41,6 +41,8 @@ jobs:
         run: command -v xcodegen || brew install xcodegen
       - name: Test texture subsystem (BC decode, Metal format mapping, deswizzle)
         run: make -C dm/gfx/tex/tests run
+      - name: Test geometry shader replay and index compaction
+        run: make -C dm/gfx/tests GAME=$GAME t_geometry && dm/gfx/tests/t_geometry
       - name: Build Odyssey-profile iOS project with synthetic inputs
         run: |
           mkdir -p logs
