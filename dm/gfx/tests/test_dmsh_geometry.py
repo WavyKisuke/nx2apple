@@ -173,6 +173,25 @@ class GeometryDiagnostics(unittest.TestCase):
             self.assertIn('error: unsupported MSL expression', text)
 
 
+    def test_translator_run_requests_and_captures_full_stack(self):
+        with tempfile.TemporaryDirectory(prefix='geometry_translator_diagnostics_') as d:
+            root = Path(d)
+            fake = root / 'fake_translator.py'
+            fake.write_text(
+                'import os, sys\\n'
+                'assert os.environ.get("DMSH_STACK") == "1"\\n'
+                'print("translated: 0 ok, 1 failed")\\n'
+                'print("[RED] shader: InvalidOperationException: unsupported geometry instruction", file=sys.stderr)\\n'
+                'print("   at Ryujinx.Graphics.Shader.Translator.Translate() in Translator.cs:line 123", file=sys.stderr)\\n'
+                'sys.exit(1)\\n')
+            result = dmsh_geometry.run_translator(
+                [sys.executable, str(fake)], root / 'jobs.json', root / 'output')
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('translated: 0 ok, 1 failed', result.stdout)
+            self.assertIn('unsupported geometry instruction', result.stderr)
+            self.assertIn('Translator.cs:line 123', result.stderr)
+
+
 class GeometryOutputLayout(unittest.TestCase):
     def test_passthrough_uses_input_primitive_vertex_count(self):
         layouts = [dmsh_geometry.output_layout(geometry_header(), t) for t in range(5)]
