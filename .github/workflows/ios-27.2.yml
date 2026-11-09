@@ -59,6 +59,8 @@ jobs:
         env:
           DMSH_TEST_XLATE: ${{ github.workspace }}/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
         run: python3 -m unittest discover -s dm/gfx/tests -p 'test_dmsh_geometry.py' -v
+      - name: Test iOS RomFS picker validation and startup lookup
+        run: python3 -m unittest discover -s dm/ios/tests -p 'test_romfs_startup.py' -v
       - name: Build and archive CI-only non-runnable iOS fixture
         run: |
           mkdir -p logs
