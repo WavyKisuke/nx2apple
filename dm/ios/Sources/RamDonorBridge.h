@@ -2,7 +2,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#if defined(__APPLE__)
+// Native host regression tests provide local donor stubs. Do not mark those
+// definitions as weak imports: Apple's linker otherwise leaves their
+// references unresolved even though the test translation unit defines them.
+#if defined(DM_RAM_DONOR_TEST_STUB)
+#define DM_RAM_DONOR_WEAK
+#elif defined(__APPLE__)
 #define DM_RAM_DONOR_WEAK __attribute__((weak_import))
 #else
 #define DM_RAM_DONOR_WEAK __attribute__((weak))
