@@ -27,6 +27,24 @@ static int memory_getpagesize(void) {
 #undef mprotect
 #undef getpagesize
 
+// hle_svc.c can optionally call the iOS RAM-donor extension. The native
+// regression executable intentionally does not link Objective-C/XPC extension
+// code, so provide inert implementations here and exercise the normal heap
+// fallback path. Device builds use the real definitions in MLXRamDonor.m.
+void *mlx_ram_donor_acquire_up_to(uint64_t size, uint64_t minimum, uint64_t *actual) {
+    (void)size; (void)minimum;
+    if (actual) *actual = 0;
+    return NULL;
+}
+bool mlx_ram_donor_map_region(void *base, void *target, uint64_t size) {
+    (void)base; (void)target; (void)size;
+    return false;
+}
+void mlx_ram_donor_release(void *base) { (void)base; }
+void mlx_ram_donor_set_kill_after_mapping(bool enabled) { (void)enabled; }
+const char *mlx_ram_donor_last_error(void) { return "RAM donor is not linked in the host test"; }
+void mlx_ram_donor_set_status(const char *status) { (void)status; }
+
 module_t g_mod[MAX_MOD];
 int g_nmod;
 struct dm_flags g_flag;
