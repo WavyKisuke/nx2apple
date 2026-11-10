@@ -81,6 +81,7 @@ static void mem_init_once(void) {
                 if (!reason || !*reason) reason = "No donor process could provide the requested memory";
                 LOG("[mem] RAM donation unavailable: %s; using local guest heap", reason);
                 if (donated && mlx_ram_donor_release) mlx_ram_donor_release(donated);
+                if (mlx_ram_donor_shutdown) mlx_ram_donor_shutdown();
                 if (mlx_ram_donor_set_status) {
                     char status[192];
                     snprintf(status, sizeof status, "Donation unavailable — %.140s", reason);
