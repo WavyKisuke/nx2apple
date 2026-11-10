@@ -48,7 +48,7 @@ jobs:
           test -d "$app"
           mkdir -p "$package"
           ditto "$app" "$package/DmIOS.app"
-          printf '%s\\n' 'CI COMPILE/LINK FIXTURE ONLY — NOT AN INSTALLABLE OR PLAYABLE APP.' 'This bundle embeds zero-filled placeholder game modules and synthetic resources.' 'It contains no game files, keys, real shader libraries, or device-tested runtime.' 'Do not install or launch it.' > "$package/DmIOS.app/CI_FIXTURE_NOT_RUNNABLE.txt"
+          printf '%s\n' 'CI COMPILE/LINK FIXTURE ONLY — NOT AN INSTALLABLE OR PLAYABLE APP.' 'This bundle embeds zero-filled placeholder game modules and synthetic resources.' 'It contains no game files, keys, real shader libraries, or device-tested runtime.' 'Do not install or launch it.' > "$package/DmIOS.app/CI_FIXTURE_NOT_RUNNABLE.txt"
           (cd "$package" && /usr/bin/zip -qry "$archive" DmIOS.app)
           test -s "$archive"
           /usr/bin/unzip -Z1 "$archive" | grep -qx 'DmIOS.app/Info.plist'
