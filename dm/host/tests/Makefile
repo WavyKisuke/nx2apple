@@ -166,7 +166,7 @@ tsan: $(B)/t_audio_spsc_tsan $(B)/t_hid_tsan
 	$(B)/t_audio_spsc_tsan
 	$(B)/t_hid_tsan
 
-MEM_FLAGS = -O1 -Wall -Werror -Wno-unused-function -Imemory_profile -I..
+MEM_FLAGS = -O1 -Wall -Werror -Wno-unused-function -DDM_RAM_DONOR_TEST_STUB -Imemory_profile -I..
 MEM_DEPS = t_svc_memory.c memory_profile/game_profile.h ../hle_svc.c ../hle_guestthread.c ../hle.h ../dm.h ../hle_profile.c ../hle_profile.h
 $(B)/t_svc_memory: $(MEM_DEPS) | $(B)
 	clang $(MEM_FLAGS) -fsanitize=undefined -o $@ t_svc_memory.c ../hle_profile.c
