@@ -7,10 +7,15 @@
 // references unresolved even though the test translation unit defines them.
 #if defined(DM_RAM_DONOR_TEST_STUB)
 #define DM_RAM_DONOR_WEAK
+#define DM_RAM_DONOR_AVAILABLE(function) (1)
 #elif defined(__APPLE__)
 #define DM_RAM_DONOR_WEAK __attribute__((weak_import))
 #else
 #define DM_RAM_DONOR_WEAK __attribute__((weak))
+#endif
+
+#ifndef DM_RAM_DONOR_AVAILABLE
+#define DM_RAM_DONOR_AVAILABLE(function) ((function) != NULL)
 #endif
 
 void *mlx_ram_donor_acquire_up_to(uint64_t size, uint64_t minimum, uint64_t *actual) DM_RAM_DONOR_WEAK;
