@@ -1,0 +1,291 @@
+name: Private Odyssey IPA (public free macOS runner)
+
+# Manual only. Never run this workflow for pull requests or pushes.
+# The repository is public, so output files are uploaded directly to the private Wavy23 release;
+# no IPA, RomFS image, game package, key, or build artifact is uploaded to this public repository.
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_release_tag:
+        description: "Private Wavy23 release containing the split Odyssey ZIP"
+        required: true
+        default: "odyssey-nsp-2026-11-09"
+        type: string
+      output_release_tag:
+        description: "Private Wavy23 release tag where the new IPA will be saved"
+        required: true
+        default: "odyssey-a14-ipa-2026-11-09"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-odyssey-ipa-public-runner
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Odyssey for iPhone (A14)
+    runs-on: xcode-27
+    timeout-minutes: 360
+    env:
+      PRIVATE_REPO: WavyKisuke/Wavy23
+      J: "2"
+    steps:
+      - name: Confirm this is the intended public source repo and a manual run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "WavyKisuke/nx2apple"
+          test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+          is_private="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.private')"
+          test "${is_private}" = "false"
+
+      - name: Checkout the A14 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: odyssey-a14
+          persist-credentials: false
+
+      - name: Select Xcode 27.1 and verify iOS SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcode="/Applications/Xcode_27.1.app/Contents/Developer"
+          test -d "$xcode"
+          sudo xcode-select --switch "$xcode"
+          xcodebuild -version
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          test "$sdk" = "27.1"
+
+      - name: Install and verify the Metal Toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -downloadComponent MetalToolchain
+          expected_ios="$(awk -F '\\t' '$1 == "metal_iphoneos" {print $2}' dm/gfx/tools/dmsh_chain.lock)"
+          expected_mac="$(awk -F '\\t' '$1 == "metal_macosx" {print $2}' dm/gfx/tools/dmsh_chain.lock)"
+          actual_ios="$(xcrun -sdk iphoneos metal --version 2>&1 | head -n 1)"
+          actual_mac="$(xcrun -sdk macosx metal --version 2>&1 | head -n 1)"
+          if [ "$actual_ios" != "$expected_ios" ] || [ "$actual_mac" != "$expected_mac" ]; then
+            echo "::error::Installed Metal compilers do not match dm/gfx/tools/dmsh_chain.lock."
+            echo "Expected iOS: $expected_ios"
+            echo "Actual iOS:   $actual_ios"
+            echo "Expected macOS: $expected_mac"
+            echo "Actual macOS:   $actual_mac"
+            exit 1
+          fi
+
+      - name: Install XcodeGen and zstd
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen zstd
+          command -v make
+          command -v xcodegen
+          command -v zstd
+
+      - name: Set up Python 3.12 and .NET 10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install Python build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check lz4 capstone fonttools backports.zstd nsz
+          python --version
+          dotnet --list-sdks
+
+      - name: Download and reassemble the private Odyssey input (never publish it)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WAVY23_TOKEN }}
+          PROD_KEYS: ${{ secrets.PROD_KEYS }}
+          INPUT_RELEASE_TAG: ${{ inputs.input_release_tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::Missing WAVY23_TOKEN Actions secret."
+            exit 1
+          fi
+          if [[ -z "${PROD_KEYS:-}" ]]; then
+            echo "::error::Missing PROD_KEYS Actions secret."
+            exit 1
+          fi
+          private="$(gh api "repos/$PRIVATE_REPO" --jq '.private')"
+          if [[ "$private" != "true" ]]; then
+            echo "::error::Wavy23 must remain private."
+            exit 1
+          fi
+
+          assets="$RUNNER_TEMP/odyssey-release-assets"
+          input="$RUNNER_TEMP/odyssey-nsp"
+          mkdir -p "$assets" "$input"
+          printf '%s' "$PROD_KEYS" > "$RUNNER_TEMP/prod.keys"
+          chmod 600 "$RUNNER_TEMP/prod.keys"
+          unset PROD_KEYS
+
+          gh api "repos/$PRIVATE_REPO/releases/tags/$INPUT_RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+          gh release download "$INPUT_RELEASE_TAG" --repo "$PRIVATE_REPO" \
+            --dir "$assets" --pattern '*.nsp' --pattern '*.NSP' \
+            --pattern '*.nsz' --pattern '*.NSZ' --pattern '*.xci' --pattern '*.XCI' \
+            --pattern 'odyssey.zip.part-*'
+
+          python3 - "$RUNNER_TEMP/release.json" "$assets" "$input" <<'PY'
+          import hashlib
+          import json
+          import shutil
+          import stat
+          import sys
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          release_path, assets_arg, input_arg = map(Path, sys.argv[1:])
+          assets_dir, input_dir = assets_arg, input_arg
+          release = json.loads(release_path.read_text())
+          metadata = {asset["name"]: asset for asset in release.get("assets", [])}
+          allowed = {".nsp", ".nsz", ".xci", ".xcz"}
+
+          part_names = [
+              "odyssey.zip.part-aa",
+              "odyssey.zip.part-ab",
+              "odyssey.zip.part-ac",
+          ]
+          part_paths = [assets_dir / name for name in part_names]
+          for src in list(assets_dir.iterdir()):
+              if src.is_file() and src.suffix.lower() in allowed:
+                  dest = input_dir / src.name
+                  if dest.exists():
+                      raise SystemExit(f"Duplicate game package filename: {src.name}")
+                  shutil.move(str(src), str(dest))
+
+          present_parts = [p for p in assets_dir.glob("odyssey.zip.part-*")]
+          if present_parts:
+              if {p.name for p in present_parts} != set(part_names):
+                  raise SystemExit("Expected exactly odyssey.zip.part-aa, -ab, and -ac.")
+              for path in part_paths:
+                  asset = metadata.get(path.name)
+                  if not asset or not path.is_file():
+                      raise SystemExit(f"Missing release asset metadata or file: {path.name}")
+                  if path.stat().st_size != int(asset["size"]):
+                      raise SystemExit(f"Size mismatch for {path.name}")
+                  digest = asset.get("digest")
+                  if digest and digest.startswith("sha256:"):
+                      hasher = hashlib.sha256()
+                      with path.open("rb") as stream:
+                          for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+                              hasher.update(chunk)
+                      if hasher.hexdigest().lower() != digest.split(":", 1)[1].lower():
+                          raise SystemExit(f"SHA-256 mismatch for {path.name}")
+
+              archive = assets_dir.parent / "odyssey-reassembled.zip"
+              with archive.open("wb") as out:
+                  for path in part_paths:
+                      with path.open("rb") as src:
+                          shutil.copyfileobj(src, out, 8 * 1024 * 1024)
+              shutil.rmtree(assets_dir)
+              with zipfile.ZipFile(archive) as zf:
+                  bad = zf.testzip()
+                  if bad:
+                      raise SystemExit(f"ZIP CRC check failed: {bad}")
+                  extracted = 0
+                  for info in zf.infolist():
+                      member = PurePosixPath(info.filename)
+                      if info.is_dir() or member.suffix.lower() not in allowed:
+                          continue
+                      if member.is_absolute() or ".." in member.parts:
+                          raise SystemExit(f"Unsafe archive path: {info.filename}")
+                      mode = (info.external_attr >> 16) & 0o170000
+                      if mode == stat.S_IFLNK:
+                          raise SystemExit(f"Symbolic link rejected: {info.filename}")
+                      name = member.name
+                      if not name:
+                          raise SystemExit(f"Invalid game package name: {info.filename}")
+                      dest = input_dir / name
+                      if dest.exists():
+                          raise SystemExit(f"Duplicate game package filename: {name}")
+                      with zf.open(info) as src, dest.open("xb") as dst:
+                          shutil.copyfileobj(src, dst, 8 * 1024 * 1024)
+                      extracted += 1
+              archive.unlink(missing_ok=True)
+              print(f"Validated ZIP and extracted {extracted} package file(s).")
+          else:
+              shutil.rmtree(assets_dir, ignore_errors=True)
+
+          packages = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() in allowed)
+          if not packages:
+              raise SystemExit("No NSP, NSZ, XCI, or XCZ found in the selected private release.")
+          for path in packages:
+              print(f"Private input ready: {path.name} ({path.stat().st_size / 2**30:.2f} GiB)")
+          release_path.unlink(missing_ok=True)
+          PY
+          unset GH_TOKEN
+
+      - name: Build the real A14 iOS IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/odyssey-out"
+          python3 scripts/build_ipa_from_nsp.py \
+            "$RUNNER_TEMP/odyssey-nsp" \
+            --keys "$RUNNER_TEMP/prod.keys" \
+            --out "$RUNNER_TEMP/odyssey-out/SuperMarioOdyssey.ipa" \
+            --work-dir "$RUNNER_TEMP/odyssey-work" \
+            --gpu none \
+            --disk-reserve-gb 1 \
+            --delete-inputs-after-extract \
+            --keep-extracted \
+            --progress lines
+
+          ipa="$RUNNER_TEMP/odyssey-out/SuperMarioOdyssey.ipa"
+          test -s "$ipa"
+          unzip -tq "$ipa"
+          unzip -Z1 "$ipa" | grep -qx 'Payload/DmIOS.app/Info.plist'
+          unzip -Z1 "$ipa" | grep -qx 'Payload/DmIOS.app/DmIOS'
+          if unzip -Z1 "$ipa" | grep -q 'CI_FIXTURE_NOT_RUNNABLE'; then
+            echo "::error::Refusing to publish a CI-only placeholder fixture."
+            exit 1
+          fi
+          check="$RUNNER_TEMP/ipa-check"
+          mkdir -p "$check"
+          unzip -oq "$ipa" 'Payload/DmIOS.app/DmIOS' -d "$check"
+          lipo -verify_arch arm64 "$check/Payload/DmIOS.app/DmIOS"
+          echo "Validated real arm64 iOS IPA: $(du -h "$ipa" | awk '{print $1}')"
+
+      - name: Upload only the IPA to the private Wavy23 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WAVY23_TOKEN }}
+          OUTPUT_RELEASE_TAG: ${{ inputs.output_release_tag }}
+        run: |
+          set -euo pipefail
+          ipa="$RUNNER_TEMP/odyssey-out/SuperMarioOdyssey.ipa"
+          if ! gh release view "$OUTPUT_RELEASE_TAG" --repo "$PRIVATE_REPO" >/dev/null 2>&1; then
+            gh release create "$OUTPUT_RELEASE_TAG" --repo "$PRIVATE_REPO" \
+              --title "Odyssey A14 IPA" \
+              --notes "Private unsigned IPA built from the odyssey-a14 source branch. The existing external RomFS.img is not included in this release."
+          fi
+          gh release upload "$OUTPUT_RELEASE_TAG" "$ipa" --repo "$PRIVATE_REPO" --clobber
+          uploaded="$(gh api "repos/$PRIVATE_REPO/releases/tags/$OUTPUT_RELEASE_TAG" \
+            --jq '.assets[] | select(.name == "SuperMarioOdyssey.ipa") | .size')"
+          test "$uploaded" = "$(stat -f%z "$ipa")"
+          echo "Verified private release asset upload: SuperMarioOdyssey.ipa ($uploaded bytes)"
+          unset GH_TOKEN
+
+      - name: Remove keys, staged game files, and build intermediates
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/prod.keys" "$RUNNER_TEMP/release.json" \
+            "$RUNNER_TEMP/odyssey-reassembled.zip"
+          rm -rf "$RUNNER_TEMP/odyssey-release-assets" \
+            "$RUNNER_TEMP/odyssey-nsp" "$RUNNER_TEMP/odyssey-work" \
+            "$RUNNER_TEMP/odyssey-out" "$RUNNER_TEMP/ipa-check"
