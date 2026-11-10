@@ -461,7 +461,7 @@ static void transfer_memory_lifecycle(void) {
     svc_dispatch(0x15, r, 0); assert(r[0] == BAD);
     r[0] = 0; r[1] = src + 8 * pg; r[2] = n; r[3] = 2;
     svc_dispatch(0x15, r, 0); assert(r[0] == 0xd801);
-    r[0] = 0; r[1] = src; r[2] = n - P; r[3] = 3;
+    r[0] = handle; r[1] = dst; r[2] = n - P; r[3] = 3;
     svc_dispatch(0x51, r, 0); assert(r[0] == 0xca01);
     r[0] = handle; r[1] = dst; r[2] = n; r[3] = 1;
     svc_dispatch(0x51, r, 0); assert(r[0] == 0xd801);
