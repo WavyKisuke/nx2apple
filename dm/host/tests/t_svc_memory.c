@@ -41,6 +41,7 @@ bool mlx_ram_donor_map_region(void *base, void *target, uint64_t size) {
     return false;
 }
 void mlx_ram_donor_release(void *base) { (void)base; }
+void mlx_ram_donor_shutdown(void) {}
 void mlx_ram_donor_set_kill_after_mapping(bool enabled) { (void)enabled; }
 const char *mlx_ram_donor_last_error(void) { return "RAM donor is not linked in the host test"; }
 void mlx_ram_donor_set_status(const char *status) { (void)status; }
