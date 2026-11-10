@@ -41,6 +41,7 @@ jobs:
           set -euo pipefail
           test "${GITHUB_REPOSITORY}" = "WavyKisuke/nx2apple"
           test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+          test "${GITHUB_REF}" = "refs/heads/main"
           is_private="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.private')"
           test "${is_private}" = "false"
 
