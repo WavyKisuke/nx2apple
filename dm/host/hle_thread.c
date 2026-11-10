@@ -1048,7 +1048,11 @@ static int svc_thread_impl(int num, uint64_t *regs) {
         pthread_mutex_unlock(&G);
         regs[0] = t ? 0 : R_BAD_HANDLE; return 1;
     }
-    case 0x16: {  // CloseHandle(w0): an event is freed only when both ends are closed; after a thread handle is closed the slot is recycled, and the object is freed once the thread has also exited
+    case 0x16: {  // CloseHandle(w0): transfer memory is handled by the memory layer; events and threads use this table
+        uint64_t transfer_result;
+        if (svc_transfer_close_handle((uint32_t)regs[0], &transfer_result)) {
+            regs[0] = transfer_result; return 1;
+        }
         pthread_mutex_lock(&G);
         unsigned i = (uint32_t)regs[0] - 0x1000;
         if (i > 0 && i < MAX_H && (g_h[i].type == O_EVENT_R || g_h[i].type == O_EVENT_W)) {
