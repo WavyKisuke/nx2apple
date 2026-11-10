@@ -198,10 +198,12 @@ private struct LauncherView: View {
                             Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
                         }
                     }
-                    Section("Donation status") {
+                    Section {
                         Text(ramDonorStatus)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    } header: {
+                        Text("Donation status")
                     } footer: {
                         Text("Status is updated by the previous game launch. Donated RAM backs the guest heap; GPU donation is not enabled in this build.")
                     }
