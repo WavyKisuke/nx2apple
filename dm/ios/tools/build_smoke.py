@@ -32,7 +32,7 @@ def main():
     gen = project / 'Gen'
     tables = gen / 'dm'
     tables.mkdir(parents=True)
-    for name in ('Sources', 'tools'):
+    for name in ('Sources', 'tools', 'RamDonor'):
         (project / name).symlink_to(ios / name, target_is_directory=True)
     shutil.copyfile(ios / 'project.yml', project / 'project.yml')
     assets = gen / 'Assets.xcassets'
@@ -96,6 +96,15 @@ def main():
                            (shaders / marker, app / 'msl' / f'b-{chain}' / marker)):
         if source.read_bytes() != packed.read_bytes():
             raise RuntimeError(f'Resource staging failed: {packed}')
+    donor = app / 'PlugIns/DmRamDonor.appex'
+    if not donor.is_dir():
+        raise RuntimeError(f'RAM donor extension was not embedded: {donor}')
+    donor_info = plistlib.loads((donor / 'Info.plist').read_bytes())
+    extension = donor_info.get('NSExtension', {})
+    if extension.get('NSExtensionPrincipalClass') != 'MLXRamDonorHandler':
+        raise RuntimeError('RAM donor extension has the wrong principal class')
+    if not (donor / 'DmRamDonor').is_file():
+        raise RuntimeError('RAM donor extension executable is missing')
     if (app / '_CodeSignature').exists() or (app / 'embedded.mobileprovision').exists():
         raise RuntimeError('The smoke-test app must be unsigned')
     print(f'iOS smoke build passed: {executable}', flush=True)

@@ -1,6 +1,7 @@
 // Horizon kernel system calls (triggered by the SDK runtime once the SDK is loaded). Only what the P1 boot chain needs is implemented: memory layout + heap + query + debug output + timing.
 // Register convention: inputs w1.. / outputs w0=Result, x1=value (GetInfo / SetHeapSize), consistent with the public Horizon ABI.
 #include "dm.h"
+#include "../ios/Sources/RamDonorBridge.h"
 #include <sys/mman.h>
 #include <errno.h>
 #include <unistd.h>
@@ -52,6 +53,44 @@ static void mem_init_once(void) {
     g_heap  = g_stack + g_stack_cap; g_heap_cap  = RESERVE - (size_t)(g_heap - g_as);
     if (!(g_alias_bits = calloc((g_alias_cap >> 18) + 1, sizeof *g_alias_bits))) die("alias region page bitmap calloc");
     if (!(g_alias_exposed = calloc(g_alias_cap / pg / 64 + 1, sizeof *g_alias_exposed))) die("alias exposure bitmap calloc");
+    // Optional shared-memory guest heap backing. The launcher sets DM_RAM_DONOR before dm_main starts.
+    // Cap the donor request for the A14 device; any shortage falls back to the original anonymous
+    // mapping without changing the Switch-visible heap layout.
+    const char *donor_switch = getenv("DM_RAM_DONOR");
+    if (donor_switch && atoi(donor_switch) > 0) {
+        const uint64_t donor_minimum = 256ull * 1024ull * 1024ull;
+        const uint64_t donor_limit = 1536ull * 1024ull * 1024ull;
+        const uint64_t donor_request = g_heap_cap < donor_limit ? g_heap_cap : donor_limit;
+        if (!mlx_ram_donor_acquire_up_to || !mlx_ram_donor_map_region) {
+            LOG("[mem] RAM donor helper is not linked; using local guest heap");
+            if (mlx_ram_donor_set_status) mlx_ram_donor_set_status("Unavailable — RAM donor helper is not in this build");
+        } else {
+            if (mlx_ram_donor_set_kill_after_mapping) mlx_ram_donor_set_kill_after_mapping(true);
+            uint64_t granted = 0;
+            void *donated = mlx_ram_donor_acquire_up_to(donor_request, donor_minimum, &granted);
+            if (donated && granted >= donor_minimum &&
+                mlx_ram_donor_map_region(donated, g_heap, granted)) {
+                char status[160];
+                snprintf(status, sizeof status, "Mapped %llu MiB of donated guest RAM",
+                         (unsigned long long)(granted / (1024ull * 1024ull)));
+                LOG("[mem] %s into guest heap (heap capacity %.2f GB)",
+                    status, g_heap_cap / 1073741824.0);
+                if (mlx_ram_donor_set_status) mlx_ram_donor_set_status(status);
+            } else {
+                const char *reason = mlx_ram_donor_last_error ? mlx_ram_donor_last_error() : NULL;
+                if (!reason || !*reason) reason = "No donor process could provide the requested memory";
+                LOG("[mem] RAM donation unavailable: %s; using local guest heap", reason);
+                if (donated && mlx_ram_donor_release) mlx_ram_donor_release(donated);
+                if (mlx_ram_donor_set_status) {
+                    char status[192];
+                    snprintf(status, sizeof status, "Donation unavailable — %.140s", reason);
+                    mlx_ram_donor_set_status(status);
+                }
+            }
+        }
+    } else {
+        if (mlx_ram_donor_set_status) mlx_ram_donor_set_status("Off — using the normal iOS guest heap");
+    }
     LOG("guest AS %p +%#llx  heap %p alias %p stack %p", g_as, (unsigned long long)RESERVE, g_heap, g_alias, g_stack);
     const char *aw = getenv("DM_ALIAS_WINDOWS");
     if (aw && atoi(aw) > 0) { pthread_t th; if (!pthread_create(&th, NULL, alias_windows_thread, (void *)(uintptr_t)atoi(aw))) pthread_detach(th); }

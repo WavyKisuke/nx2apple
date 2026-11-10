@@ -8,6 +8,7 @@ struct Setting: Decodable, Identifiable {
     let options: [[String]]?   // choice: [value, label]
     let min, max, step: Double?   // range
     let on, off: String?   // toggle: the values the variable takes (1 / 0 when not given)
+    let disabled: Bool?     // optional UI lock for features whose native backend is not ready
     var id: String { env }
     var sectionTitle: String { section ?? "Game" }
     var onValue: String { on ?? "1" }
@@ -25,7 +26,7 @@ struct Setting: Decodable, Identifiable {
         default: return true
         }
     }
-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, options, min, max, step, on, off }
+    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, options, min, max, step, on, off, disabled }
 }
 struct SettingsFile: Decodable { let settings: [Setting] }
 
@@ -33,6 +34,19 @@ final class LauncherModel: ObservableObject {
     let settings: [Setting]
     let fromFile: Set<String>   // set by an env file: shown, not changed
     @Published var values: [String: String] = [:]
+
+    static let memoryDonationSettings: [Setting] = [
+        Setting(env: "DM_RAM_DONOR", kind: "toggle",
+                label: "Enable donated RAM",
+                note: "Use shared memory from helper processes to back Mario's guest heap.",
+                def: "0", section: "Memory Donation", options: nil,
+                min: nil, max: nil, step: nil, on: "1", off: "0", disabled: false),
+        Setting(env: "DM_RAM_DONOR_GPU", kind: "toggle",
+                label: "GPU memory donation",
+                note: "Unavailable until the Metal shared-buffer import path is implemented.",
+                def: "0", section: "Memory Donation", options: nil,
+                min: nil, max: nil, step: nil, on: "1", off: "0", disabled: true)
+    ]
 
     private let defaults: UserDefaults
 

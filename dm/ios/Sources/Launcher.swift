@@ -60,7 +60,7 @@ private struct SettingRow: View {
                 }
             }
         }
-        .disabled(locked)
+        .disabled(locked || s.disabled == true)
     }
 }
 
@@ -159,6 +159,7 @@ private struct LauncherView: View {
     @ObservedObject var m: LauncherModel
     let play: () -> Void
     @State private var memory = os_proc_available_memory()
+    @AppStorage("dm.ramDonor.status") private var ramDonorStatus = "Not attempted yet"
 
     var body: some View {
         GeometryReader { geometry in
@@ -197,6 +198,13 @@ private struct LauncherView: View {
                             Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
                         }
                     }
+                    Section("Donation status") {
+                        Text(ramDonorStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } footer: {
+                        Text("Status is updated by the previous game launch. Donated RAM backs the guest heap; GPU donation is not enabled in this build.")
+                    }
                 }
                 .listStyle(.insetGrouped)
                 .contentMargins(.horizontal, 12, for: .scrollContent)
@@ -232,7 +240,7 @@ public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @c
     guard let url = Bundle.main.resourceURL?.appendingPathComponent("dm/launcher.json"), let data = try? Data(contentsOf: url) else { return false }
     guard let file = try? JSONDecoder().decode(SettingsFile.self, from: data), !file.settings.isEmpty else { fputs("[RED] launcher: dm/launcher.json cannot be read; starting the game\n", stderr); return false }
     let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()
-    let model = LauncherModel(file.settings)
+    let model = LauncherModel(file.settings + LauncherModel.memoryDonationSettings)
     var host: UIViewController?
     let view = LauncherView(m: model) {
         guard let h = host else { return }

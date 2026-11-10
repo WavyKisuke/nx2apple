@@ -42,7 +42,7 @@ if [ "$PREPARE_XCODE" = YES ]; then
   IOS=$(cd "$IOS" && pwd)
   [ "$IOS" != "$IOS_SOURCE" ] || die "the per-game Xcode project must be outside dm/ios"
   # Source links follow repository edits; generated files and build products belong to this game only. Linked again each time: a project prepared from another checkout (a removed worktree) follows this one
-  for item in Sources tools; do ln -sfn "$IOS_SOURCE/$item" "$IOS/$item" || die "link $item"; done
+  for item in Sources tools RamDonor; do ln -sfn "$IOS_SOURCE/$item" "$IOS/$item" || die "link $item"; done
   cp "$IOS_SOURCE/project.yml" "$IOS/project.yml" || die "copy project template"
   cd "$IOS" || die "cd $IOS"
   DM_SCHEME_NAME="$(echo "$DM_DISPLAY_NAME" | tr '/:' '__') ($GAME)"   # the scheme file is named after it
@@ -145,6 +145,12 @@ xcodebuild -project DmIOS.xcodeproj -scheme DmIOS -configuration Release -destin
 # SYMROOT and OBJROOT above keep the unsigned build separate from the interactive Xcode app.
 APP=$DD/Build/Products/Release-iphoneos/DmIOS.app
 [ -n "$APP" ] && [ -d "$APP" ] || die "no built app"; t "app: $APP"
+# The helper is nested code: clear extended attributes, sign it with its own extension entitlements,
+# then sign the containing DmIOS.app below with the app's Increased Memory Limit entitlement.
+xattr -cr "$APP" 2>/dev/null
+DONOR_EXT="$APP/PlugIns/DmRamDonor.appex"
+[ -d "$DONOR_EXT" ] || die "no embedded RAM donor extension $DONOR_EXT"
+codesign --force --sign - --entitlements "$IOS/RamDonor/RamDonor.entitlements" "$DONOR_EXT" || die "sign RAM donor extension"
 # The unsigned IPA: an unsigned binary has no signature for a sideloader to read entitlements from,
 # so the request would be lost (AltStore reads the signature it replaces). Sign ad-hoc with the
 # entitlement first; the sideloader strips this signature and carries the entitlement over.
@@ -152,10 +158,6 @@ if [ "$PREPARE_XCODE" != YES ] && [ -n "${DM_ENTITLEMENTS-default}" ]; then
   if [ -n "${DM_ENTITLEMENTS:-}" ]; then cp "$DM_ENTITLEMENTS" "$APP/DmIOS.entitlements" || die "copy DM_ENTITLEMENTS"
   else printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
     '<plist version="1.0"><dict><key>com.apple.developer.kernel.increased-memory-limit</key><true/></dict></plist>' > "$APP/DmIOS.entitlements" || die "entitlements"; fi
-  # codesign refuses a bundle whose files carry resource forks, Finder information, quarantine or
-  # provenance attributes ("resource fork, Finder information, or similar detritus not allowed");
-  # files copied into the bundle (the icon, resources staged from a Downloads folder) can bring them
-  xattr -cr "$APP" 2>/dev/null
   codesign --force --sign - --entitlements "$APP/DmIOS.entitlements" "$APP" || die "ad-hoc sign with entitlements (the sideloader re-signs; this only carries the request)"
   codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q increased-memory-limit || die "entitlements did not make it into the placeholder signature"
   t "entitlements: increased-memory-limit embedded in the placeholder signature"

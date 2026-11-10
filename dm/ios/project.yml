@@ -11,6 +11,11 @@ targets:
   DmIOS:
     type: application
     platform: iOS
+    dependencies:
+      - target: DmRamDonor
+        embed: true
+        codeSign: true
+        link: false
     sources:
       - path: Sources
         excludes: [Info.plist]  # generated per project under Gen/, so games never share the generated plist
@@ -79,6 +84,36 @@ targets:
       SWIFT_OBJC_BRIDGING_HEADER: Sources/DmIOS-Bridging-Header.h   # DataBookmark (the Files app pick)
       DEBUG_INFORMATION_FORMAT: dwarf
       GCC_WARN_INHIBIT_ALL_WARNINGS: YES
+  DmRamDonor:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RamDonor
+        excludes:
+          - RamDonor.entitlements
+    info:
+      path: Gen/RamDonor-Info.plist
+      properties:
+        CFBundleDisplayName: "NX2Apple RAM Donor"
+        NSExtension:
+          NSExtensionAttributes:
+            NSExtensionActivationRule: "FALSEPREDICATE"
+          NSExtensionContextClass: NSExtensionContext
+          NSExtensionContextHostClass: NSExtensionContext
+          NSExtensionPointIdentifier: com.apple.ar.viewer
+          NSExtensionPrincipalClass: MLXRamDonorHandler
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: ${DM_BUNDLE_ID}.ramdonor
+      PRODUCT_NAME: DmRamDonor
+      DEVELOPMENT_TEAM: ${DM_TEAM_ID}
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_ENTITLEMENTS: RamDonor/RamDonor.entitlements
+      SKIP_INSTALL: YES
+      TARGETED_DEVICE_FAMILY: "1"
+      ENABLE_BITCODE: NO
+      CLANG_ENABLE_OBJC_ARC: YES
+      GCC_WARN_INHIBIT_ALL_WARNINGS: YES
+
 schemes:
   ${DM_SCHEME_NAME}:
     build:
