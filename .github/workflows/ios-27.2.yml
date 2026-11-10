@@ -36,15 +36,28 @@ jobs:
           grep -n -- '-mcpu=apple-a14' dm/ios/project.yml
       - name: Install XcodeGen
         run: command -v xcodegen || brew install xcodegen
-      - name: Build production iOS project with synthetic inputs
+      - name: Compile production iOS target with synthetic inputs (CI only)
         run: |
           mkdir -p logs
           python3 dm/ios/tools/build_smoke.py --output "$RUNNER_TEMP/ios-smoke" 2>&1 | tee logs/ios-build.log
-      - name: Upload unsigned iOS 27.2 A14 fixture
+      - name: Package explicit non-runnable CI fixture (not an IPA)
+        run: |
+          app="$RUNNER_TEMP/ios-smoke/derived/Build/Products/Release-iphoneos/DmIOS.app"
+          package="$RUNNER_TEMP/ios-smoke/package"
+          archive="$RUNNER_TEMP/ios-smoke/NX2Apple-CI-ONLY-NOT-RUNNABLE.zip"
+          test -d "$app"
+          mkdir -p "$package"
+          ditto "$app" "$package/DmIOS.app"
+          printf '%s\\n' 'CI COMPILE/LINK FIXTURE ONLY — NOT AN INSTALLABLE OR PLAYABLE APP.' 'This bundle embeds zero-filled placeholder game modules and synthetic resources.' 'It contains no game files, keys, real shader libraries, or device-tested runtime.' 'Do not install or launch it.' > "$package/DmIOS.app/CI_FIXTURE_NOT_RUNNABLE.txt"
+          (cd "$package" && /usr/bin/zip -qry "$archive" DmIOS.app)
+          test -s "$archive"
+          /usr/bin/unzip -Z1 "$archive" | grep -qx 'DmIOS.app/Info.plist'
+          /usr/bin/unzip -Z1 "$archive" | grep -qx 'DmIOS.app/CI_FIXTURE_NOT_RUNNABLE.txt'
+      - name: Upload CI-only non-runnable build fixture (not an IPA)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: nx2apple-ios27.2-a14-unsigned-fixture
-          path: ${{ runner.temp }}/ios-smoke/DmIOS-CI-synthetic.ipa
+          name: nx2apple-ios27.2-a14-CI-only-NOT-runnable-fixture
+          path: ${{ runner.temp }}/ios-smoke/NX2Apple-CI-ONLY-NOT-RUNNABLE.zip
           if-no-files-found: error
           retention-days: 14
       - name: Upload build logs on failure
