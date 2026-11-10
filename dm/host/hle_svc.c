@@ -94,16 +94,24 @@ static uint8_t g_seen[256];
 // g_map_lock is held over a whole lookup + check + change (and over QueryMemory's reads): map_find's index is only valid under it, since map_del moves the last entry into the freed slot.
 // The lock used to cover only the add and the delete, so two threads unmapping at once (stacks of exiting threads) could delete through a stale index and drop another live mapping
 #define MAX_MAP 4096
-static struct { uint64_t base, size, src; uint32_t state; } g_map[MAX_MAP];
+static struct { uint64_t base, size, src; uint32_t state, perm; } g_map[MAX_MAP];
 static int g_nmap;
+#define MAX_TRANSFER 256
+#define TRANSFER_HANDLE_BASE 0x2000u
+typedef struct transfer_memory {
+    uint64_t src, size, dst;
+    uint32_t perm;
+    int mapped;
+} transfer_memory_t;
+static transfer_memory_t *g_transfer[MAX_TRANSFER];
 static pthread_mutex_t g_map_lock = PTHREAD_MUTEX_INITIALIZER;
 static int map_find(uint64_t a, uint64_t n) {       // returns a 1-based index, 0 = no overlap; caller holds g_map_lock
     for (int i = 0; i < g_nmap; i++) if (a < g_map[i].base + g_map[i].size && g_map[i].base < a + n) return i + 1;
     return 0;
 }
-static void map_add(uint64_t b, uint64_t n, uint64_t src, uint32_t st) {   // caller holds g_map_lock
+static void map_add(uint64_t b, uint64_t n, uint64_t src, uint32_t st, uint32_t perm) {   // caller holds g_map_lock
     if (g_nmap >= MAX_MAP) die("mapping table full");
-    g_map[g_nmap++] = (typeof(g_map[0])){b, n, src, st};
+    g_map[g_nmap++] = (typeof(g_map[0])){b, n, src, st, perm};
 }
 static void map_del(int i) { g_map[i] = g_map[--g_nmap]; }   // caller holds g_map_lock
 
@@ -194,6 +202,10 @@ static uint32_t map_arguments(uint64_t dst, uint64_t src, uint64_t size) {
 static int map_source_busy(uint64_t addr, uint64_t size) { // g_map_lock held; nonwrapping ranges
     for (int i = 0; i < g_nmap; ++i)
         if (addr < g_map[i].src + g_map[i].size && g_map[i].src < addr + size) return 1;
+    for (int i = 0; i < MAX_TRANSFER; ++i) if (g_transfer[i]) {
+        uint64_t src = g_transfer[i]->src, end = src + g_transfer[i]->size;
+        if (addr < end && src < addr + size) return 1;
+    }
     return 0;
 }
 // Loader text/patch seals use 16 KiB boundaries, independently of host page size.
@@ -225,6 +237,110 @@ static int map_source_backed(uint64_t src, uint64_t size) {
     module_data_query(m, off, &lo, &hi, &perm);
     return perm == 3 && hi >= lo && memory_contains(lo, hi - lo, off, size);
 }
+
+// Transfer memory handles occupy a disjoint range from the thread/event handle table.
+// The SDK ABI is CreateTransferMemory(x1 address, x2 size, w3 owner permission)
+// -> w0 result, w1 handle. Map/UnmapTransferMemory use x0 handle, x1 address,
+// x2 size, w3 permission. Transfer source ranges stay locked until the handle closes.
+enum { TM_INVALID_ADDRESS = 0xD401, TM_INVALID_SIZE = 0xCA01, TM_INVALID_PERMISSION = 0xD801,
+       TM_INVALID_HANDLE = 0xE401, TM_INVALID_STATE = 0xFA01, TM_OUT_OF_RESOURCE = 0xCE01 };
+static uint32_t transfer_host_prot(uint32_t perm) {
+    return ((perm & 1) ? PROT_READ : 0) | ((perm & 2) ? PROT_WRITE : 0);
+}
+static int transfer_perm_valid(uint32_t perm) { return perm == 0 || perm == 1 || perm == 3; }
+static int transfer_index(uint32_t handle) {
+    if (handle <= TRANSFER_HANDLE_BASE || handle > TRANSFER_HANDLE_BASE + MAX_TRANSFER) return -1;
+    return (int)(handle - TRANSFER_HANDLE_BASE - 1);
+}
+static uint32_t transfer_create_locked(uint64_t src, uint64_t size, uint32_t perm) {
+    int slot = -1;
+    for (int i = 0; i < MAX_TRANSFER; ++i) if (!g_transfer[i]) { slot = i; break; }
+    if (slot < 0) return TM_OUT_OF_RESOURCE;
+    if ((src | size) & ((uint64_t)getpagesize() - 1)) return TM_INVALID_ADDRESS;
+    if (!map_source_backed(src, size) || map_find(src, size) || map_source_busy(src, size))
+        return TM_INVALID_ADDRESS;
+    transfer_memory_t *t = calloc(1, sizeof *t);
+    if (!t) return TM_OUT_OF_RESOURCE;
+    t->src = src; t->size = size; t->perm = perm;
+    if (mprotect((void *)(uintptr_t)src, (size_t)size, (int)transfer_host_prot(perm))) {
+        free(t); return TM_INVALID_ADDRESS;
+    }
+    g_transfer[slot] = t;
+    return TRANSFER_HANDLE_BASE + (uint32_t)slot + 1;
+}
+static uint32_t transfer_map_locked(transfer_memory_t *t, uint64_t dst, uint64_t size, uint32_t perm) {
+    if (size != t->size) return TM_INVALID_SIZE;
+    if (perm != t->perm || !transfer_perm_valid(perm)) return TM_INVALID_PERMISSION;
+    if (t->mapped) return TM_INVALID_STATE;
+    if ((dst | size) & 0xfff) return 0xCC01;
+    if ((dst | size) & ((uint64_t)getpagesize() - 1)) return TM_INVALID_ADDRESS;
+    if (size > UINT64_MAX - dst) return TM_INVALID_ADDRESS;
+    int in_alias = memory_contains((uintptr_t)g_alias, g_alias_cap, dst, size);
+    int in_stack = memory_contains((uintptr_t)g_stack, g_stack_cap, dst, size);
+    if (!in_alias && !in_stack) return 0xDC01;
+    if (map_find(dst, size) || map_source_busy(dst, size)) return TM_INVALID_ADDRESS;
+    if (in_alias && alias_unmapped(dst - (uintptr_t)g_alias, size) != (int64_t)(size >> 12))
+        return TM_INVALID_ADDRESS;
+    if (g_nmap >= MAX_MAP) return TM_OUT_OF_RESOURCE;
+    // The host has no primitive that aliases arbitrary anonymous pages on every
+    // supported iOS version. Mirror the source into the guest mapping and copy
+    // writable data back on unmap, matching the move/return behavior used by
+    // this HLE's MapMemory implementation.
+    if (mprotect((void *)(uintptr_t)t->src, (size_t)t->size, PROT_READ | PROT_WRITE) ||
+        mprotect((void *)(uintptr_t)dst, (size_t)size, PROT_READ | PROT_WRITE))
+        die("MapTransferMemory mprotect failed: errno=%d", errno);
+    dm_guest_write_prepare((void *)(uintptr_t)dst, (size_t)size);
+    memcpy((void *)(uintptr_t)dst, (void *)(uintptr_t)t->src, (size_t)size);
+    if (mprotect((void *)(uintptr_t)t->src, (size_t)t->size, (int)transfer_host_prot(t->perm)) ||
+        mprotect((void *)(uintptr_t)dst, (size_t)size, (int)transfer_host_prot(perm)))
+        die("MapTransferMemory restore protection failed: errno=%d", errno);
+    map_add(dst, size, t->src, t->perm ? 0x0E /*SharedTransfered*/ : 0x0D /*Transfered*/, perm);
+    t->mapped = 1; t->dst = dst;
+    return 0;
+}
+static uint32_t transfer_unmap_locked(transfer_memory_t *t, uint64_t dst, uint64_t size) {
+    if (size != t->size) return TM_INVALID_SIZE;
+    if (!t->mapped) return TM_INVALID_STATE;
+    if (dst != t->dst) return TM_INVALID_ADDRESS;
+    int k = map_find(dst, size);
+    if (!k || g_map[k - 1].base != dst || g_map[k - 1].size != size ||
+        g_map[k - 1].src != t->src || (g_map[k - 1].state != 0x0D && g_map[k - 1].state != 0x0E))
+        return TM_INVALID_ADDRESS;
+    if (t->perm & 2) {
+        if (mprotect((void *)(uintptr_t)t->src, (size_t)size, PROT_READ | PROT_WRITE) ||
+            mprotect((void *)(uintptr_t)dst, (size_t)size, PROT_READ | PROT_WRITE))
+            die("UnmapTransferMemory mprotect failed: errno=%d", errno);
+        dm_guest_write_prepare((void *)(uintptr_t)t->src, (size_t)size);
+        memcpy((void *)(uintptr_t)t->src, (void *)(uintptr_t)dst, (size_t)size);
+        if (mprotect((void *)(uintptr_t)t->src, (size_t)size, (int)transfer_host_prot(t->perm)))
+            die("UnmapTransferMemory source protection failed: errno=%d", errno);
+    }
+    if (mprotect((void *)(uintptr_t)dst, (size_t)size, PROT_NONE))
+        die("UnmapTransferMemory destination protection failed: errno=%d", errno);
+    (void)madvise((void *)(uintptr_t)dst, (size_t)size, MADV_FREE);
+    map_del(k - 1);
+    t->mapped = 0; t->dst = 0;
+    return 0;
+}
+// Called by CloseHandle in hle_thread.c. Returns 1 when this handle belongs to
+// the transfer-memory handle range, with the Horizon result in *result.
+int svc_transfer_close_handle(uint32_t handle, uint64_t *result) {
+    int i = transfer_index(handle);
+    if (i < 0) return 0;
+    pthread_mutex_lock(&g_map_lock);
+    transfer_memory_t *t = g_transfer[i];
+    uint32_t r = 0;
+    if (!t) r = TM_INVALID_HANDLE;
+    else {
+        if (t->mapped) r = transfer_unmap_locked(t, t->dst, t->size);
+        if (!r && mprotect((void *)(uintptr_t)t->src, (size_t)t->size, PROT_READ | PROT_WRITE))
+            r = TM_INVALID_ADDRESS;
+        if (!r) { g_transfer[i] = NULL; free(t); }
+    }
+    pthread_mutex_unlock(&g_map_lock);
+    *result = r;
+    return 1;
+}
 static void map_source_query(uint64_t addr, uint64_t *base, uint64_t *size, uint32_t *attr, uint64_t *perm) {
     uint64_t lo = *base, remaining = *size; // the final free page can end at 2^64
     for (int i = 0; i < g_nmap; ++i) {
@@ -234,6 +350,17 @@ static void map_source_query(uint64_t addr, uint64_t *base, uint64_t *size, uint
             if (src > lower) lower = src;
             if (end - lo < upper) upper = end - lo;
             *attr = 1; *perm = 0; // Locked / IsBorrowed, not PermissionLocked (bit 4)
+        } else if (end <= addr && end > lower) lower = end;
+        else if (src > addr && src - lo < upper) upper = src - lo;
+        remaining = upper - (lower - lo); lo = lower;
+    }
+    for (int i = 0; i < MAX_TRANSFER; ++i) if (g_transfer[i]) {
+        uint64_t src = g_transfer[i]->src, end = src + g_transfer[i]->size;
+        uint64_t lower = lo, upper = remaining;
+        if (addr >= src && addr < end) {
+            if (src > lower) lower = src;
+            if (end - lo < upper) upper = end - lo;
+            *attr = 1; *perm = 0; // Transfer memory locks its owner's source range
         } else if (end <= addr && end > lower) lower = end;
         else if (src > addr && src - lo < upper) upper = src - lo;
         remaining = upper - (lower - lo); lo = lower;
@@ -268,6 +395,39 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
     mem_init();
     if (svc_thread(num, regs)) return regs[0];
     switch (num) {
+    case 0x15: {  // CreateTransferMemory(x1 address, x2 size, w3 permission) -> w1 handle
+        uint64_t src = regs[1], size = regs[2]; uint32_t perm = (uint32_t)regs[3], result;
+        if (!size || (size & 0xfff)) result = TM_INVALID_SIZE;
+        else if ((src & 0xfff) || size > UINT64_MAX - src) result = TM_INVALID_ADDRESS;
+        else if (!transfer_perm_valid(perm)) result = TM_INVALID_PERMISSION;
+        else {
+            pthread_mutex_lock(&g_map_lock);
+            result = transfer_create_locked(src, size, perm);
+            pthread_mutex_unlock(&g_map_lock);
+        }
+        if (result >= TRANSFER_HANDLE_BASE + 1 && result <= TRANSFER_HANDLE_BASE + MAX_TRANSFER) {
+            regs[0] = 0; regs[1] = result;
+        } else { regs[0] = result; regs[1] = 0; }
+        return 0;
+    }
+    case 0x51: {  // MapTransferMemory(handle, address, size, permission)
+        uint32_t handle = (uint32_t)regs[0], result = TM_INVALID_HANDLE;
+        int i = transfer_index(handle);
+        pthread_mutex_lock(&g_map_lock);
+        if (i >= 0 && g_transfer[i])
+            result = transfer_map_locked(g_transfer[i], regs[1], regs[2], (uint32_t)regs[3]);
+        pthread_mutex_unlock(&g_map_lock);
+        regs[0] = result; return 0;
+    }
+    case 0x52: {  // UnmapTransferMemory(handle, address, size)
+        uint32_t handle = (uint32_t)regs[0], result = TM_INVALID_HANDLE;
+        int i = transfer_index(handle);
+        pthread_mutex_lock(&g_map_lock);
+        if (i >= 0 && g_transfer[i])
+            result = transfer_unmap_locked(g_transfer[i], regs[1], regs[2]);
+        pthread_mutex_unlock(&g_map_lock);
+        regs[0] = result; return 0;
+    }
     case 0x01: {  // SetHeapSize(out_addr*, size)  → x1 = heap base
         size_t size = regs[1];
         // Larger than the heap region: ResultOutOfMemory (0xD001), as Horizon's KPageTable::SetHeapSize returns. nn::os::SetMemoryHeapSize turns only that, 103 and LimitReached into
@@ -320,7 +480,7 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
         if (mprotect((void *)lo, hi - lo, PROT_READ | PROT_WRITE)) die("MapMemory mprotect errno=%d", errno);
         dm_guest_write_prepare((void *)lo, hi - lo);
         memcpy((void *)dst, (void *)src, size);   // move semantics: the source region is not accessed while mapped (Horizon makes it inaccessible)
-        map_add(dst, size, src, 0x0B /*MappedMemory*/);
+        map_add(dst, size, src, 0x0B /*MappedMemory*/, 3);
         pthread_mutex_unlock(&g_map_lock);
         if (g_flag.svc) LOG("MapMemory %#llx <- %#llx +%#llx", dst, src, size);
         regs[0] = 0; return 0;
@@ -351,7 +511,7 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
         int mapped = 0, in_alias = addr >= ab && addr < ae;
         if (in_alias) alias_query(addr, &rb, &rn, &mapped);
         if (a >= g_heap && a < g_heap + g_heap_cur) { base=(uint64_t)g_heap; size=g_heap_cur; state=5/*Heap*/; perm=3; }
-        else if ((k = map_find(addr, 1))) { base=g_map[k-1].base; size=g_map[k-1].size; state=g_map[k-1].state; perm=3; }
+        else if ((k = map_find(addr, 1))) { base=g_map[k-1].base; size=g_map[k-1].size; state=g_map[k-1].state; perm=g_map[k-1].perm; }
         else if (in_alias && mapped) { base=rb; size=rn; state=5; perm=3; }
         else if (a >= g_as && a < g_as + RESERVE) {   // free: up to the adjacent mapping/heap boundary
             uint64_t lo = (uint64_t)g_as, hi = (uint64_t)g_as + RESERVE;
@@ -421,7 +581,9 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
         // The SDK extends committed windows across borrowed stack sources
         // (Raging Loop, StandardAllocator). Recommit preserves every live byte;
         // only decommit can invalidate backing required for eventual copyback.
-        if (num == 0x2D && map_source_busy(a, size)) { pthread_mutex_unlock(&g_map_lock); regs[0] = 0xD401; return 0; }
+        if (map_find(a, size) || (num == 0x2D && map_source_busy(a, size))) {
+            pthread_mutex_unlock(&g_map_lock); regs[0] = 0xD401; return 0;
+        }
         uint64_t off = a - (uintptr_t)g_alias;
         int64_t need = alias_unmapped(off, size) * 4096;
         // Profile mem_map_limit: a map that would take the process past the application pool fails with ResultLimitReached, as on Horizon (the pool less the used memory GetInfo reports).
