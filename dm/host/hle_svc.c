@@ -61,11 +61,11 @@ static void mem_init_once(void) {
         const uint64_t donor_minimum = 256ull * 1024ull * 1024ull;
         const uint64_t donor_limit = 1536ull * 1024ull * 1024ull;
         const uint64_t donor_request = g_heap_cap < donor_limit ? g_heap_cap : donor_limit;
-        if (!mlx_ram_donor_acquire_up_to || !mlx_ram_donor_map_region) {
+        if (!DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_acquire_up_to) || !DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_map_region)) {
             LOG("[mem] RAM donor helper is not linked; using local guest heap");
-            if (mlx_ram_donor_set_status) mlx_ram_donor_set_status("Unavailable — RAM donor helper is not in this build");
+            if (DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_set_status)) mlx_ram_donor_set_status("Unavailable — RAM donor helper is not in this build");
         } else {
-            if (mlx_ram_donor_set_kill_after_mapping) mlx_ram_donor_set_kill_after_mapping(true);
+            if (DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_set_kill_after_mapping)) mlx_ram_donor_set_kill_after_mapping(true);
             uint64_t granted = 0;
             void *donated = mlx_ram_donor_acquire_up_to(donor_request, donor_minimum, &granted);
             if (donated && granted >= donor_minimum &&
@@ -75,14 +75,14 @@ static void mem_init_once(void) {
                          (unsigned long long)(granted / (1024ull * 1024ull)));
                 LOG("[mem] %s into guest heap (heap capacity %.2f GB)",
                     status, g_heap_cap / 1073741824.0);
-                if (mlx_ram_donor_set_status) mlx_ram_donor_set_status(status);
+                if (DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_set_status)) mlx_ram_donor_set_status(status);
             } else {
-                const char *reason = mlx_ram_donor_last_error ? mlx_ram_donor_last_error() : NULL;
+                const char *reason = DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_last_error) ? mlx_ram_donor_last_error() : NULL;
                 if (!reason || !*reason) reason = "No donor process could provide the requested memory";
                 LOG("[mem] RAM donation unavailable: %s; using local guest heap", reason);
-                if (donated && mlx_ram_donor_release) mlx_ram_donor_release(donated);
-                if (mlx_ram_donor_shutdown) mlx_ram_donor_shutdown();
-                if (mlx_ram_donor_set_status) {
+                if (donated && DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_release)) mlx_ram_donor_release(donated);
+                if (DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_shutdown)) mlx_ram_donor_shutdown();
+                if (DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_set_status)) {
                     char status[192];
                     snprintf(status, sizeof status, "Donation unavailable — %.140s", reason);
                     mlx_ram_donor_set_status(status);
@@ -90,7 +90,7 @@ static void mem_init_once(void) {
             }
         }
     } else {
-        if (mlx_ram_donor_set_status) mlx_ram_donor_set_status("Off — using the normal iOS guest heap");
+        if (DM_RAM_DONOR_AVAILABLE(mlx_ram_donor_set_status)) mlx_ram_donor_set_status("Off — using the normal iOS guest heap");
     }
     LOG("guest AS %p +%#llx  heap %p alias %p stack %p", g_as, (unsigned long long)RESERVE, g_heap, g_alias, g_stack);
     const char *aw = getenv("DM_ALIAS_WINDOWS");
