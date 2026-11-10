@@ -445,6 +445,55 @@ static void guest_helper(void) {
     assert(resize(0) == BAD);
     dm_guest_thread_join(tt); assert(helper_freed && !g_nmap && !g_heap_cur);
 }
+static void transfer_memory_lifecycle(void) {
+    size_t pg = (size_t)memory_getpagesize(), n = 4 * pg;
+    assert(!resize(8 * pg));
+    uintptr_t src = heap + 2 * pg, dst = alias + 64 * pg;
+    memset((void *)src, 0x3c, n);
+
+    uint64_t r[31] = {0, src, n, 3};
+    svc_dispatch(0x15, r, 0); // CreateTransferMemory: handle is returned in w1.
+    assert(!r[0] && r[1] >= 0x2001 && r[1] <= 0x2100);
+    uint32_t handle = (uint32_t)r[1];
+    expect(src, src, n, 5, 1, 0); // Source is locked while its handle is alive.
+
+    r[0] = 0; r[1] = src + 1; r[2] = n; r[3] = 3;
+    svc_dispatch(0x15, r, 0); assert(r[0] == BAD);
+    r[0] = 0; r[1] = src + 8 * pg; r[2] = n; r[3] = 2;
+    svc_dispatch(0x15, r, 0); assert(r[0] == 0xd801);
+    r[0] = 0; r[1] = src; r[2] = n - P; r[3] = 3;
+    svc_dispatch(0x51, r, 0); assert(r[0] == 0xca01);
+    r[0] = handle; r[1] = dst; r[2] = n; r[3] = 1;
+    svc_dispatch(0x51, r, 0); assert(r[0] == 0xd801);
+
+    r[0] = handle; r[1] = dst; r[2] = n; r[3] = 3;
+    svc_dispatch(0x51, r, 0); assert(!r[0]);
+    assert(!memcmp((void *)dst, (void *)src, n));
+    expect(dst, dst, n, 0x0e, 0, 3);
+    expect(src, src, n, 5, 1, 0);
+
+    r[0] = handle; r[1] = dst; r[2] = n; r[3] = 3;
+    svc_dispatch(0x51, r, 0); assert(r[0] == 0xfa01);
+    r[0] = handle; r[1] = dst + pg; r[2] = n; r[3] = 0;
+    svc_dispatch(0x52, r, 0); assert(r[0] == BAD);
+    r[0] = handle; r[1] = dst; r[2] = n - P; r[3] = 0;
+    svc_dispatch(0x52, r, 0); assert(r[0] == 0xca01);
+
+    memset((void *)dst, 0x6d, n);
+    r[0] = handle; r[1] = dst; r[2] = n; r[3] = 0;
+    svc_dispatch(0x52, r, 0); assert(!r[0]);
+    for (size_t i = 0; i < n; ++i) assert(((uint8_t *)src)[i] == 0x6d);
+    assert(query(dst).state == 0); // Destination mapping was released.
+
+    uint64_t close_result = UINT64_MAX;
+    assert(svc_transfer_close_handle(handle, &close_result) == 1 && close_result == 0);
+    memory_info source = query(src);
+    assert(source.state == 5 && source.attr == 0 && source.perm == 3);
+    r[0] = handle; r[1] = dst; r[2] = n; r[3] = 3;
+    svc_dispatch(0x51, r, 0); assert(r[0] == 0xe401);
+    assert(!resize(0));
+}
+
 static void *init_worker(void *arg) { *(uint64_t *)arg = info(I_AliasAddr); return NULL; }
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--heap-probe")) {
@@ -460,6 +509,7 @@ int main(int argc, char **argv) {
     alias = addresses[0]; stack = info(I_StackAddr); heap = info(I_HeapAddr);
     lazy_commit(); alias_lifecycle(); ownership(); module_sources(); failures(); concurrency(); fragmented_queries();
     guest_helper();
+    transfer_memory_lifecycle();
     if (!DM_GAME_MEM_MAP_LIMIT) metadata_limit();
 #ifdef TEST_REAL_DIRTY
     dirty_integration();
