@@ -272,15 +272,17 @@ jobs:
           output_tag="${OUTPUT_RELEASE_TAG:-odyssey-a14-ipa-${GITHUB_RUN_ID}}"
           source_commit="$(git rev-parse HEAD)"
           built_at="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          notes="$(printf '%s\\n' \
-            'Private unsigned IPA built from the odyssey-a14 source branch.' \
-            '' \
-            "Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            "Run number: ${GITHUB_RUN_NUMBER}" \
-            "Built at: ${built_at}" \
-            "Source commit: ${source_commit}" \
-            '' \
-            'The existing external RomFS.img is not included in this release.')"
+          notes="$(cat <<EOF
+          Private unsigned IPA built from the odyssey-a14 source branch.
+
+          Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Run number: ${GITHUB_RUN_NUMBER}
+          Built at: ${built_at}
+          Source commit: ${source_commit}
+
+          The existing external RomFS.img is not included in this release.
+          EOF
+          )"
           if ! gh release view "$output_tag" --repo "$PRIVATE_REPO" >/dev/null 2>&1; then
             gh release create "$output_tag" --repo "$PRIVATE_REPO" \
               --title "Odyssey A14 IPA (run #${GITHUB_RUN_NUMBER})" \
