@@ -688,6 +688,14 @@ def write_profile(pdir, app, f):
     layout and the NVN API version (the host reads the SDK version)"""
     pdir.mkdir(parents=True, exist_ok=True)
     if (pdir / 'game.tsv').exists():
+        profile_path = pdir / 'game.tsv'
+        profile_text = profile_path.read_text(encoding='utf-8')
+        # A provisional profile has no per-game texture testing yet. Enable the existing BC
+        # CPU decoder by default: it is selected only on GPUs without native BC support, so
+        # A17 Pro / M-series devices retain the native compressed-texture path.
+        if not re.search(r'(?m)^tex_bc_cpu\t', profile_text):
+            profile_path.write_text(profile_text.rstrip() + '\n\n# ---- GPU compatibility ----\ntex_bc_cpu\ton\n', encoding='utf-8')
+            say('enabled tex_bc_cpu in the reused provisional profile (A14 and other GPUs without BC support)')
         say(f'reusing the provisional profile: {pdir / "game.tsv"} (delete it to regenerate from the survey)')
         return
     F = f['F']; G, R = pg.guess(F), F['romfs']
@@ -711,6 +719,7 @@ def write_profile(pdir, app, f):
          '# ---- App ----', f'name{T}{name}', f'ipa{T}{ipa_name(name, app)}', f'app_category{T}public.app-category.games', *key('pad_layout'), *key('op_mode'), '',
          '# ---- Versions ----', T.join(['build', f['version'], f['display']] + [f'{m}={F["mods"][m]["bid"]}' for m in mods]), f'package{T}{f["version"]}', f'shader_versions{T}{f["version"]}', '',
          '# ---- Files ----', *key('modules'), f'romfs_marker{T}{R["biggest"][1]}', f'zip_store{T}{":".join(store + [".metallib"])}', '',
+         '# ---- GPU compatibility ----', f'tex_bc_cpu{T}on', '',
          '# ---- Memory ----', *key('mem_reserve'), *key('mem_alias'), *key('mem_stack'), *key('app_pool'), *key('sys_resource'), '',
          '# ---- Shader split ----', *key('shader_groups', " ".join(groups) or "/=romfs"), f'shader_note{T}{name} shaders (provisional profile)']
     (pdir / 'game.tsv').write_text('\n'.join(L) + '\n', encoding='utf-8')
