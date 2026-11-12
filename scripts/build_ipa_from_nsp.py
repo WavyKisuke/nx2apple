@@ -693,8 +693,8 @@ def write_profile(pdir, app, f):
         # A provisional profile has no per-game texture testing yet. Enable the existing BC
         # CPU decoder by default: it is selected only on GPUs without native BC support, so
         # A17 Pro / M-series devices retain the native compressed-texture path.
-        if not re.search(r'(?m)^tex_bc_cpu\\t', profile_text):
-            profile_path.write_text(profile_text.rstrip() + '\\n\\n# ---- GPU compatibility ----\\ntex_bc_cpu\\ton\\n', encoding='utf-8')
+        if not re.search(r'(?m)^tex_bc_cpu\t', profile_text):
+            profile_path.write_text(profile_text.rstrip() + '\n\n# ---- GPU compatibility ----\ntex_bc_cpu\ton\n', encoding='utf-8')
             say('enabled tex_bc_cpu in the reused provisional profile (A14 and other GPUs without BC support)')
         say(f'reusing the provisional profile: {pdir / "game.tsv"} (delete it to regenerate from the survey)')
         return
